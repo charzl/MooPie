@@ -5,10 +5,16 @@ import sys
 def main():
     parser=argparse.ArgumentParser(description="MooPython desktop market client")
     parser.add_argument("--render-preview")
+    parser.add_argument("--sdk-check", action="store_true")
     parser.add_argument("--quit-after",type=int,default=0)
     parser.add_argument("--host")
     parser.add_argument("--port",type=int,default=11111)
     args=parser.parse_args()
+    if args.sdk_check:
+        import moomoo
+        assert callable(moomoo.OpenQuoteContext)
+        print("Official moomoo SDK import passed")
+        return 0
     if args.render_preview:
         os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
     from PySide6.QtWidgets import QApplication

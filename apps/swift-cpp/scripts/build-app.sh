@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-./scripts/build-sdk.sh
+if [[ ! -f build-sdk/libMMAPI.a ]]; then ./scripts/build-sdk.sh; fi
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP_DIR="$PWD/dist/MooSwiftCpp.app"
@@ -29,6 +29,14 @@ for file in files:
   old=line.strip().split(' (',1)[0]; name=pathlib.Path(old).name
   if name in libraries:
    subprocess.check_call(['install_name_tool','-change',old,'@rpath/'+name,str(file)])
+# Remove build-machine search paths so smoke tests exercise bundled libraries.
+for file in files:
+ lines=subprocess.check_output(['otool','-l',str(file)],text=True).splitlines()
+ for index,line in enumerate(lines):
+  if line.strip()=='cmd LC_RPATH':
+   rpath=lines[index+2].strip().split('path ',1)[1].split(' (offset',1)[0]
+   if rpath.startswith('/') and rpath!='/usr/lib/swift':
+    subprocess.check_call(['install_name_tool','-delete_rpath',rpath,str(file)])
 subprocess.check_call(['install_name_tool','-add_rpath','@executable_path/../Frameworks',str(files[0])])
 PY
 mkdir -p "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES"
