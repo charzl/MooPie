@@ -45,6 +45,7 @@ mkdir -p "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES"
 tar -xOf vendor/MMAPI4CPP_10.11.7108/ThirdLibSrc/protobuf-3.21.5.tar.gz protobuf-3.21.5/LICENSE > "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES/protobuf-LICENSE"
 tar -xOf vendor/MMAPI4CPP_10.11.7108/ThirdLibSrc/openssl-3.0.17.tar.gz openssl-3.0.17/LICENSE.txt > "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES/openssl-LICENSE.txt"
 for LIB in "$APP_DIR"/Contents/Frameworks/*.dylib; do codesign --force --sign - "$LIB"; done
+python3 ../../scripts/bundle-opend.py "$APP_DIR"
 codesign --force --sign - "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
 ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "dist/MooSwiftCpp-macos-$(uname -m).zip"

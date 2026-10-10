@@ -238,6 +238,7 @@ struct ContentView: View {
 }
 
 struct ConnectionSettings: View {
+    @ObservedObject private var runtime = OpenDService.shared
     @ObservedObject var model: MarketModel
     @Environment(\.dismiss) private var dismiss
     @State private var host = UserDefaults.standard.string(forKey: "host") ?? "127.0.0.1"
@@ -251,7 +252,13 @@ struct ConnectionSettings: View {
             HStack { Text("端口").frame(width: 40, alignment: .leading); TextField("11111", text: $port) }
             Text("当前仅支持本机 TCP / JSON、未配置 RSA 加密的 OpenD。行情权限及延迟由账户决定。")
                 .font(.system(size: 11)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
-            Link("下载官方 moomoo OpenD ↗", destination: URL(string: "https://www.moomoo.com/download/OpenAPI")!)
+            HStack {
+                Button("启动 / 登录 OpenD") { runtime.run("launch") }
+                Button("检查更新") { runtime.run("update") }
+                Button("回退旧版") { runtime.run("rollback") }
+            }.disabled(runtime.busy)
+            Text(runtime.status).font(.system(size: 11)).foregroundStyle(Palette.orange).fixedSize(horizontal: false, vertical: true)
+            Link("官方 moomoo OpenD 下载页 ↗", destination: URL(string: "https://www.moomoo.com/download/OpenAPI")!)
             Divider()
             Toggle("红涨绿跌", isOn: $model.redUp)
             Text(model.message).font(.system(size: 11)).foregroundStyle(Palette.orange).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

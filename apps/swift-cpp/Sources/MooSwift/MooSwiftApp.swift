@@ -8,6 +8,7 @@ struct MooSwiftApp: App {
             ContentView(model: model)
                 .frame(minWidth: 1150, minHeight: 680)
                 .preferredColorScheme(.dark)
+                .task { OpenDService.shared.start() }
         }
         .defaultSize(width: 1500, height: 900)
         .windowStyle(.hiddenTitleBar)

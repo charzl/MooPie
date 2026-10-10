@@ -7,3 +7,7 @@
 - PySide6 / Qt: upstream LGPL/GPL/commercial licenses as applicable; packaged with their corresponding distribution metadata and license files by PyInstaller.
 
 No official OpenD executable, moomoo desktop assets, account information or credentials are included in this repository.
+
+## Official moomoo OpenD runtime
+
+The packages include the unchanged, proprietary official GUI OpenD distribution from [moomoo's download page](https://www.moomoo.com/download/OpenAPI). Original publisher signatures and embedded notices remain intact. The repository's MIT license applies to our integration/updater code, not OpenD. The build archive is pinned in `runtime/opend.json`; binaries, account data and caches are not committed to Git. Runtime updates are downloaded from moomoo and checked against the official Developer ID publisher identity before selection.

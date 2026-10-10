@@ -36,6 +36,12 @@ def main():
     if args.benchmark_output:
         from moopython.benchmark import start
         start(window,args.benchmark_output)
+    if not args.render_preview and not args.benchmark_output:
+        QTimer.singleShot(300,lambda:window.runtime.run('launch'))
+        window.opend_update_timer=QTimer(window)
+        window.opend_update_timer.setInterval(24*60*60*1000)
+        window.opend_update_timer.timeout.connect(lambda:window.runtime.run('check'))
+        window.opend_update_timer.start()
     if args.host:
         QTimer.singleShot(100,lambda:window.connect_gateway(args.host,args.port))
     if args.render_preview:

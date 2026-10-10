@@ -34,12 +34,15 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python3 -m unittest discover -s tests/integration -v
+      - name: OpenD updater tests
+        run: swift test --package-path runtime
       - name: Package application
         run: apps/python/scripts/build-app.sh
       - name: Smoke test packaged app
         run: |
           mkdir -p artifacts
           python3 scripts/smoke-app.py apps/python/dist/MooPython.app artifacts/MooPython-preview.png
+          python3 scripts/smoke-opend.py apps/python/dist/MooPython.app artifacts/python-opend-smoke.json
           python3 scripts/build-metrics.py apps/python/dist/MooPython.app > artifacts/python-build.json
       - name: Benchmark packaged app (three trials)
         run: python3 scripts/benchmark-app.py apps/python/dist/MooPython.app artifacts/python-benchmark.json
@@ -48,7 +51,17 @@ jobs:
           name: MooPython-macos-arm64
           path: |
             apps/python/dist/*.zip
-            artifacts/*
+            artifacts/*-build.json
+            artifacts/*-benchmark*.json
+            artifacts/*-benchmark*.log
+            artifacts/*-preview.png
+            artifacts/*-opend-smoke.json
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: metrics-python
+          path: artifacts/*-benchmark.json
           if-no-files-found: error
           retention-days: 14
   swift-cpp:
@@ -75,12 +88,15 @@ jobs:
         run: swift test --package-path apps/swift-cpp --filter 'BridgeTests|MarketTests'
       - name: Official SDK and UI integration tests
         run: swift test --package-path apps/swift-cpp --filter SDKIntegrationTests
+      - name: OpenD updater tests
+        run: swift test --package-path runtime
       - name: Package application
         run: apps/swift-cpp/scripts/build-app.sh
       - name: Smoke test packaged app
         run: |
           mkdir -p artifacts
           python3 scripts/smoke-app.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/MooSwiftCpp-preview.png
+          python3 scripts/smoke-opend.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swift-cpp-opend-smoke.json
           python3 scripts/build-metrics.py apps/swift-cpp/dist/MooSwiftCpp.app > artifacts/swift-cpp-build.json
       - name: Benchmark packaged app (three trials)
         run: python3 scripts/benchmark-app.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swift-cpp-benchmark.json
@@ -89,7 +105,17 @@ jobs:
           name: MooSwiftCpp-macos-arm64
           path: |
             apps/swift-cpp/dist/*.zip
-            artifacts/*
+            artifacts/*-build.json
+            artifacts/*-benchmark*.json
+            artifacts/*-benchmark*.log
+            artifacts/*-preview.png
+            artifacts/*-opend-smoke.json
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: metrics-swift-cpp
+          path: artifacts/*-benchmark.json
           if-no-files-found: error
           retention-days: 14
 
@@ -102,7 +128,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
-          pattern: Moo*-macos-arm64
+          pattern: metrics-*
           path: artifacts/report-input
           merge-multiple: true
       - name: Test report validation

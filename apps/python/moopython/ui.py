@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, Q
 from .market import (DEFAULT_SYMBOLS, NAMES, PERIODS, symbol, demo_quote, demo_candles,
                      Quote, parse_candles, merge_candles, compact)
 from .gateway import Gateway
+from .runtime import OpenDRuntime
 from .chart import CandleChart, BG, TEXT, MUTED, RED, GREEN, ORANGE
 from .table import QuoteTableModel, QuoteDelegate
 
@@ -61,6 +62,8 @@ class MainWindow(QMainWindow):
         self.closed=False
         self.pending_quotes={}
         self.gateway=Gateway(self)
+        self.runtime = OpenDRuntime(self)
+        self.runtime.status.connect(self.set_message)
         self.gateway.event.connect(self.on_event)
         self.gateway.stopped.connect(self.shutdown_finished)
         self.build_ui()
@@ -326,7 +329,10 @@ class MainWindow(QMainWindow):
         text=QLabel("先在官方 moomoo OpenD 中登录。客户端不保存账户密码，仅连接本机网关。"); text.setWordWrap(True); layout.addWidget(text)
         form=QFormLayout(); host=QLineEdit(self.settings.value("host","127.0.0.1")); port=QSpinBox(); port.setRange(1,65535); port.setValue(int(self.settings.value("port",11111)))
         form.addRow("地址",host); form.addRow("端口",port); layout.addLayout(form)
-        download=QPushButton("下载官方 OpenD ↗"); download.clicked.connect(lambda:QDesktopServices.openUrl(QUrl("https://www.moomoo.com/download/OpenAPI"))); layout.addWidget(download)
+        for title,action in [("启动内置 OpenD / 登录","launch"),("检查 OpenD 更新","update"),("回退上一版 OpenD","rollback")]:
+            button=QPushButton(title); button.clicked.connect(lambda checked,a=action:self.runtime.run(a)); layout.addWidget(button)
+        runtime_status=QLabel("内置官方 OpenD · 自动检查更新"); runtime_status.setWordWrap(True); self.runtime.status.connect(runtime_status.setText); layout.addWidget(runtime_status)
+        download=QPushButton("官方 OpenD 下载页 ↗"); download.clicked.connect(lambda:QDesktopServices.openUrl(QUrl("https://www.moomoo.com/download/OpenAPI"))); layout.addWidget(download)
         colors=QCheckBox("红涨绿跌"); colors.setChecked(self.state.red_up); layout.addWidget(colors)
         text=QLabel("此版本仅支持本机、未配置 RSA 加密的 OpenD。实际行情权限、订阅配额和延迟由账户决定。"); text.setWordWrap(True); text.setStyleSheet("color:#939caa;font-size:11px;"); layout.addWidget(text)
         buttons=QHBoxLayout()
