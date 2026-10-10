@@ -13,3 +13,5 @@
 **/vendor/**/*.pb.cc
 artifacts/
 *.spec
+**/thirdlib
+**/build-sdk
