@@ -6,7 +6,6 @@
 | --- | --- | --- |
 | `apps/python` | PySide6 / Qt Widgets | 官方 moomoo Python SDK 10.11.7108 |
 | `apps/swift-cpp` | SwiftUI / Canvas | 官方 C++ SDK 10.11.7108，通过 C ABI 桥接 |
-| `apps/swift-direct` | SwiftUI / Canvas | 原始纯 Swift JSON 协议版，保留为参考 |
 
 目前包含自选列表、搜索、行情表格、K 线与成交量、均线、周期切换和演示模式。不是官方 moomoo 的完整复制品；未实现交易、账户和资讯功能。演示行情是生成数据，不可用于投资决策。两版当前演示生成器不同，不能据此认定某种语言性能更好。
 
@@ -44,8 +43,6 @@ swift test
 ```
 
 C++ 构建脚本从 SDK 附带的源归档编译 protobuf 3.21.5 和 OpenSSL 3.0.17，随后编译官方 SDK。动态库会一起放进应用，运行不依赖本机 Homebrew。生成文件、构建缓存、虚拟环境和应用 ZIP 不进入 Git。
-
-纯 Swift 参考版：`cd apps/swift-direct && swift test && ./scripts/build-app.sh`。
 
 ## 真实行情
 
