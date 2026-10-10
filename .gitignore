@@ -1,0 +1,15 @@
+.DS_Store
+**/.build/
+**/.venv/
+**/dist/
+**/build/
+**/build-sdk/
+**/build-deps/
+**/thirdlib/
+**/__pycache__/
+*.pyc
+*.xcuserstate
+**/vendor/**/*.pb.h
+**/vendor/**/*.pb.cc
+artifacts/
+*.spec

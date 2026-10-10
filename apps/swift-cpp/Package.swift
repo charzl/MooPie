@@ -1,0 +1,14 @@
+// swift-tools-version: 5.9
+import PackageDescription
+import Foundation
+let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
+let package = Package(name: "MooSwiftCpp", platforms: [.macOS(.v14)],
+ products: [.executable(name: "MooSwiftCpp", targets: ["MooSwift"])],
+ targets: [
+ .target(name: "MooBridge", publicHeadersPath: "include",
+ cxxSettings: [.unsafeFlags(["-I\(root)/vendor/MMAPI4CPP_10.11.7108/include", "-I\(root)/thirdlib/include"])],
+ linkerSettings: [.unsafeFlags(["-L\(root)/build-sdk", "-L\(root)/thirdlib/lib", "-lMMAPI", "-lprotobuf", "-lssl", "-lcrypto", "-Xlinker", "-rpath", "-Xlinker", "\(root)/thirdlib/lib"])]),
+ .target(name: "MooCore", dependencies: ["MooBridge"]),
+ .executableTarget(name: "MooSwift", dependencies: ["MooCore"]),
+ .testTarget(name: "MooCoreTests", dependencies: ["MooCore", "MooBridge"])
+ ], cxxLanguageStandard: .cxx17)
