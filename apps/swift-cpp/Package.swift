@@ -10,5 +10,6 @@ let package = Package(name: "MooSwiftCpp", platforms: [.macOS(.v14)],
  linkerSettings: [.unsafeFlags(["-L\(root)/build-sdk", "-L\(root)/thirdlib/lib", "-lMMAPI", "-lprotobuf", "-lssl", "-lcrypto", "-Xlinker", "-rpath", "-Xlinker", "\(root)/thirdlib/lib"])]),
  .target(name: "MooCore", dependencies: ["MooBridge"]),
  .executableTarget(name: "MooSwift", dependencies: ["MooCore"]),
- .testTarget(name: "MooCoreTests", dependencies: ["MooCore", "MooBridge"])
+ .testTarget(name: "MooCoreTests", dependencies: ["MooCore", "MooBridge"]),
+ .testTarget(name: "MooIntegrationTests", dependencies: ["MooCore", "MooBridge", "MooSwift"])
  ], cxxLanguageStandard: .cxx17)

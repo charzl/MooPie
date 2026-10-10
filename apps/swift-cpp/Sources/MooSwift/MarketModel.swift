@@ -25,16 +25,16 @@ final class MarketModel: ObservableObject {
     private var demo = true
     var currentQuote: Quote? { quotes[selected.id] }
 
-    init() {
+    init(benchmark: Bool = false) {
         let defaults = UserDefaults.standard
-        let stored = defaults.stringArray(forKey: "watchlist") ?? DemoMarket.symbols
+        let stored = benchmark ? DemoMarket.symbols : (defaults.stringArray(forKey: "watchlist") ?? DemoMarket.symbols)
         var initial: [Security] = []
         for security in stored.compactMap(Security.init(symbol:)) where !initial.contains(security) { initial.append(security) }
         if initial.isEmpty { initial = DemoMarket.symbols.compactMap(Security.init(symbol:)) }
         watchlist = Array(initial.prefix(30))
         selected = initial[0]
-        favorites = Set(defaults.stringArray(forKey: "favorites") ?? ["US.PLTR", "US.NVDA", "US.AAPL"])
-        redUp = defaults.object(forKey: "redUp") as? Bool ?? true
+        favorites = Set(benchmark ? ["US.PLTR", "US.NVDA", "US.AAPL"] : (defaults.stringArray(forKey: "favorites") ?? ["US.PLTR", "US.NVDA", "US.AAPL"]))
+        redUp = benchmark ? true : (defaults.object(forKey: "redUp") as? Bool ?? true)
         showDemo()
         client.onPush = { [weak self] id, data in self?.receivePush(id, data) }
         client.onDisconnect = { [weak self] error in

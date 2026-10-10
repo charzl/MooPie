@@ -86,10 +86,19 @@ public enum Period: String, CaseIterable, Identifiable {
 }
 
 public enum DemoMarket {
+    private static let fixture: [String: Any]? = {
+        let url = ProcessInfo.processInfo.environment["MOOMOO_BENCHMARK_FIXTURE"].map { URL(fileURLWithPath: $0) }
+            ?? Bundle.main.url(forResource: "market", withExtension: "json")
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }()
     public static let symbols = ["US.PLTR", "US.INTC", "US.AVGO", "US.TEM", "US.NVDA", "US.AAPL", "US.AMZN", "US.MSFT", "US.TSLA", "HK.00700", "HK.00981", "HK.09988", "HK.01810"]
     public static let names = ["PLTR": "Palantir", "INTC": "英特尔", "AVGO": "博通", "TEM": "Tempus AI", "NVDA": "英伟达", "AAPL": "苹果", "AMZN": "亚马逊", "MSFT": "微软", "TSLA": "特斯拉", "00700": "腾讯控股", "00981": "中芯国际", "09988": "阿里巴巴-W", "01810": "小米集团-W"]
     // Fixed synthetic fixture: never presented as current market prices.
     public static func candles(for security: Security, period: Period) -> [Candle] {
+        if let all = fixture?["candles"] as? [String: [String: [[String: Any]]]], let bars = all[security.id]?[period.rawValue] {
+            return bars.compactMap(Candle.init(json:))
+        }
         var seed = security.id.utf8.reduce(UInt64(17)) { $0 &* 31 &+ UInt64($1) } &+ UInt64(period.klType)
         func random() -> Double { seed = seed &* 6364136223846793005 &+ 1; return Double(seed >> 33) / Double(UInt32.max >> 1) }
         var price = 80.0 + Double(seed % 180)
@@ -109,6 +118,7 @@ public enum DemoMarket {
         }
     }
     public static func quote(for security: Security) -> Quote {
+        if let all = fixture?["quotes"] as? [String: [String: Any]], let data = all[security.id], let quote = Quote(json: data) { return quote }
         let bars = candles(for: security, period: .day), last = bars.last!
         return Quote(security: security, name: names[security.code] ?? security.code,
                      price: last.close, previousClose: bars[bars.count - 2].close, open: last.open,

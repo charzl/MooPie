@@ -25,6 +25,9 @@ struct MooSwiftApp: App {
 @main
 enum Launcher {
     @MainActor static func main() {
+        if let index = CommandLine.arguments.firstIndex(of: "--benchmark-output"), CommandLine.arguments.count > index + 1 {
+            Benchmark.run(output: CommandLine.arguments[index + 1]); return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--render-preview"), CommandLine.arguments.count > index + 1 {
             let application = NSApplication.shared
             application.setActivationPolicy(.prohibited)

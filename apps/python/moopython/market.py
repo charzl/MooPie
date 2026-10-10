@@ -4,6 +4,18 @@ from datetime import datetime, timedelta
 import math
 import random
 import re
+import json
+import os
+from pathlib import Path
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def shared_fixture():
+    candidates=[Path(os.environ["MOOMOO_BENCHMARK_FIXTURE"])] if os.environ.get("MOOMOO_BENCHMARK_FIXTURE") else [Path(__file__).parent.parent/"fixtures/market.json",Path(__file__).parents[3]/"fixtures/market.json"]
+    for path in candidates:
+        if path.is_file():
+            return json.loads(path.read_text())
+    return None
 
 PERIODS = {"日K": "K_DAY", "周K": "K_WEEK", "月K": "K_MON", "1分": "K_1M", "5分": "K_5M", "15分": "K_15M", "1小时": "K_60M"}
 NAMES = {"US.PLTR": "Palantir", "US.INTC": "英特尔", "US.AVGO": "博通", "US.TEM": "Tempus AI", "US.NVDA": "英伟达", "US.AAPL": "苹果", "US.AMZN": "亚马逊", "US.MSFT": "微软", "US.TSLA": "特斯拉", "HK.00700": "腾讯控股", "HK.00981": "中芯国际", "HK.09988": "阿里巴巴-W", "HK.01810": "小米集团-W"}
@@ -96,6 +108,9 @@ def averages(bars, period):
     return result
 
 def demo_candles(code, period="日K"):
+    fixture=shared_fixture()
+    if fixture and code in fixture["candles"]:
+        return [Candle(b["time"],b["openPrice"],b["highPrice"],b["lowPrice"],b["closePrice"],b["volume"]) for b in fixture["candles"][code][period]]
     rng = random.Random(f"MooPython:{code}:{period}")
     price = rng.uniform(80, 250)
     step = {"日K": 1440, "周K": 10080, "月K": 43200, "1分": 1, "5分": 5, "15分": 15, "1小时": 60}[period]
@@ -110,6 +125,10 @@ def demo_candles(code, period="日K"):
     return bars
 
 def demo_quote(code):
+    fixture=shared_fixture()
+    if fixture and code in fixture["quotes"]:
+        q=fixture["quotes"][code]
+        return Quote(code,q["name"],q["curPrice"],q["lastClosePrice"],q["openPrice"],q["highPrice"],q["lowPrice"],q["volume"],q["turnover"],q["updateTime"])
     bars = demo_candles(code)
     last = bars[-1]
     return Quote(code, NAMES.get(code, code.split(".", 1)[1]), last.close, bars[-2].close,

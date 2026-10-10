@@ -6,13 +6,15 @@ swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
 APP_DIR="$PWD/dist/MooSwiftCpp.app"
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Frameworks"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Frameworks" "$APP_DIR/Contents/Resources"
+cp ../../assets/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
+cp ../../fixtures/market.json "$APP_DIR/Contents/Resources/market.json"
 cp "$BIN_DIR/MooSwiftCpp" "$APP_DIR/Contents/MacOS/MooSwiftCpp"
 python3 - "$APP_DIR" <<'PY'
 import plistlib,sys,pathlib
 path=pathlib.Path(sys.argv[1])/'Contents/Info.plist'
 path.write_bytes(plistlib.dumps(dict(CFBundleName='MooSwiftCpp',CFBundleDisplayName='MooSwift C++',
- CFBundleIdentifier='local.charlie.mooswiftcpp',CFBundleExecutable='MooSwiftCpp',CFBundlePackageType='APPL',
+ CFBundleIconFile='AppIcon.icns',CFBundleIdentifier='local.charlie.mooswiftcpp',CFBundleExecutable='MooSwiftCpp',CFBundlePackageType='APPL',
  CFBundleShortVersionString='0.1.0',CFBundleVersion='1',LSMinimumSystemVersion='14.0',NSHighResolutionCapable=True)))
 PY
 for LIB in libprotobuf.32.dylib libssl.3.dylib libcrypto.3.dylib; do

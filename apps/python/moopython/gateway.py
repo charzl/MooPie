@@ -148,10 +148,10 @@ class Gateway(QObject):
     event = Signal(str, str, object)
     stopped = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, sdk_factory=None):
         super().__init__(parent)
         self.thread = QThread(self)
-        self.worker = GatewayWorker()
+        self.worker = GatewayWorker(sdk_factory=sdk_factory)
         self.worker.moveToThread(self.thread)
         self.command.connect(self.worker.execute, Qt.ConnectionType.QueuedConnection)
         self.worker.event.connect(self.event)
