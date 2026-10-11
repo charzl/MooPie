@@ -53,6 +53,8 @@ class PageTests(unittest.TestCase):
         page.search.setText('apple'); self.assertEqual(page.table.rowCount(),1)
         page.market.setCurrentText('港股'); self.assertEqual(page.table.rowCount(),0)
         page.market.setCurrentText('全部'); page.open_row(page.table,0); self.assertEqual(self.window.pages.currentIndex(),0)
+        before=list(self.window.state.symbols);self.window.open_chart_code('SG.BAD')
+        self.assertEqual(self.window.state.symbols,before)
         page.group_rows=[dict(code=f'US.TEST{i}') for i in range(205)]; page.page=0; page.move_page(1)
         self.assertEqual(len(self.commands[-1]['codes']),5); self.assertEqual(self.commands[-1]['codes'][0],'US.TEST200')
     def test_market_error_never_fills_synthetic_prices_and_map_renders(self):

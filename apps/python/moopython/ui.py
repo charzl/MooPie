@@ -365,7 +365,7 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentWidget(page); self.check_nav(name)
 
     def open_chart_code(self, code, name=''):
-        try: code = symbol(code)
+        try: code = symbol(code,allow_short=False)
         except ValueError:
             self.set_message('此标的暂不支持图表，请在当前页面查看快照'); return
         if code not in self.state.symbols: self.state.symbols.append(code)
