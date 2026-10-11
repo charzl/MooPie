@@ -129,6 +129,12 @@ class WatchlistDialog(QueryDialog):
 
 
 class AccountsDialog(QueryDialog):
+    def reject(self):
+        if self.window.account_page is self:
+            self.window.show_charts()
+        else:
+            super().reject()
+
     def __init__(self, window):
         super().__init__(window, '账户资产与持仓（只读）')
         self.setWindowFlags(Qt.WindowType.Widget)

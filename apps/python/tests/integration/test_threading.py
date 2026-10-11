@@ -35,4 +35,27 @@ class ThreadingTests(unittest.TestCase):
   worker.event.connect(lambda token,kind,data:events.append(kind))
   worker.execute(dict(op='connect',token='test',host='127.0.0.1',port=port,symbols=[]))
   self.assertIn('connection_error',events); self.assertIsNone(worker.ctx)
+ def test_large_watchlist_bounds_subscriptions_and_keeps_selected_quote(self):
+  active=set()
+  class Rows:
+   def to_dict(self,orient): return []
+  class Context:
+   def subscribe(self,codes,types,**kwargs): active.update(codes); return 0,None
+   def unsubscribe(self,codes,types): active.difference_update(codes); return 0,None
+   def get_stock_quote(self,codes): return 0,Rows()
+  worker=GatewayWorker(); worker.ctx=Context()
+  worker.sdk=SimpleNamespace(RET_OK=0,SubType=SimpleNamespace(QUOTE='QUOTE'))
+  worker.refresh([f'US.TEST{i}' for i in range(45)])
+  self.assertEqual(len(active),30); self.assertIn('US.TEST44',active)
+  worker.refresh(['US.TEST0'])
+  self.assertEqual(len(active),30); self.assertIn('US.TEST0',active)
+ def test_unsubscribe_failure_does_not_exceed_quote_limit(self):
+  subscriptions=[]
+  class Context:
+   def unsubscribe(self,*args): return -1,'test subscription error'
+   def subscribe(self,*args,**kwargs): subscriptions.append(True); return 0,None
+  worker=GatewayWorker(); worker.ctx=Context(); worker.quote_subscriptions=[f'US.TEST{i}' for i in range(30)]
+  worker.sdk=SimpleNamespace(RET_OK=0,SubType=SimpleNamespace(QUOTE='QUOTE'))
+  worker.refresh(['US.NEW'])
+  self.assertEqual(subscriptions,[]); self.assertEqual(len(worker.quote_subscriptions),30)
 if __name__=='__main__': unittest.main()
