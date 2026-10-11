@@ -10,6 +10,18 @@ class SDKIntegrationTests(unittest.TestCase):
  def setUp(self):
   self.server=mock.Server().start(); self.ctx=moomoo.OpenQuoteContext(host='127.0.0.1',port=self.server.server_address[1])
  def tearDown(self): self.ctx.close(); self.server.close()
+ def test_official_sdk_reads_watchlist_and_account_without_trade_operations(self):
+  from moopython.account_data import query_accounts
+  ret,groups=self.ctx.get_user_security_group(); self.assertEqual(ret,moomoo.RET_OK,str(groups))
+  self.assertEqual(groups.iloc[0]['group_name'],'My watchlist')
+  ret,stocks=self.ctx.get_user_security('My watchlist'); self.assertEqual(ret,moomoo.RET_OK,str(stocks))
+  self.assertEqual(stocks.iloc[0]['code'],'US.AAPL')
+  command=dict(op='account_details',market='US',firm='FUTUINC',currency='USD',acc_id='9007199254740993')
+  result=query_accounts(moomoo,'127.0.0.1',self.server.server_address[1],command)
+  self.assertEqual(result['acc_id'],'9007199254740993')
+  self.assertEqual(result['funds'][0]['cash'],100)
+  self.assertEqual(result['positions'][0]['code'],'US.AAPL')
+  self.assertNotIn(2005,self.server.protocols); self.assertNotIn(2202,self.server.protocols)
  def test_official_sdk_handshake_quote_kline_push_and_reconnect(self):
   ret,state=self.ctx.get_global_state(); self.assertEqual(ret,moomoo.RET_OK); self.assertTrue(state['qot_logined'])
   event=threading.Event(); pushed=[]

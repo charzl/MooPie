@@ -2,6 +2,7 @@
 import socket
 from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt
 from .market import PERIODS
+from .account_data import query_accounts, records
 
 class GatewayWorker(QObject):
     event = Signal(str, str, object)
@@ -14,12 +15,18 @@ class GatewayWorker(QObject):
         self.token = ""
         self.subscriptions = set()
         self.sdk_factory = sdk_factory
+        self.host = '127.0.0.1'
+        self.port = 11111
+        self.quote_subscriptions = []
+        self.kline_order = []
 
     def close_context(self):
         if self.ctx is not None:
             context, self.ctx = self.ctx, None
             context.close()
         self.subscriptions.clear()
+        self.quote_subscriptions.clear()
+        self.kline_order.clear()
 
     @Slot(object)
     def execute(self, command):
@@ -49,6 +56,7 @@ class GatewayWorker(QObject):
                 else:
                     sdk = self.sdk_factory()
                 self.sdk = sdk
+                self.host, self.port = host, port
                 self.ctx = sdk.OpenQuoteContext(host=host, port=port)
                 self.install_handlers(token)
                 ret, data = self.ctx.get_global_state()
@@ -61,6 +69,14 @@ class GatewayWorker(QObject):
                 return
             if op == "refresh":
                 self.refresh(command["symbols"])
+            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details'):
+                if op == 'watchlist_groups':
+                    result = dict(rows=records(self.sdk, self.ctx.get_user_security_group()))
+                elif op == 'watchlist':
+                    result = dict(rows=records(self.sdk, self.ctx.get_user_security(command['group'])))
+                else:
+                    result = query_accounts(self.sdk, self.host, self.port, command)
+                self.event.emit(token, 'user_data', dict(result, op=op, request=command['request']))
             elif op == "chart":
                 self.chart(command)
             elif op == "remove":
@@ -71,6 +87,8 @@ class GatewayWorker(QObject):
                     self.event.emit(token, "message", f"取消订阅：{data}")
                 else:
                     self.subscriptions = {key for key in self.subscriptions if key[0] != command["code"]}
+                    self.kline_order = [key for key in self.kline_order if key[0] != command['code']]
+                    if command['code'] in self.quote_subscriptions: self.quote_subscriptions.remove(command['code'])
             elif op == "state":
                 ret, data = self.ctx.get_global_state()
                 if ret != self.sdk.RET_OK:
@@ -86,6 +104,8 @@ class GatewayWorker(QObject):
                 self.event.emit(token, "connection_error", f"连接失败：{error}")
             elif op == "chart":
                 self.event.emit(token, "chart_error", {"request": command["request"], "message": str(error)})
+            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details'):
+                self.event.emit(token, 'user_data_error', dict(request=command['request'], error=str(error)))
             else:
                 self.event.emit(token, "message", str(error))
 
@@ -116,10 +136,17 @@ class GatewayWorker(QObject):
     def refresh(self, symbols):
         errors = []
         for code in symbols:
-            ret, data = self.ctx.subscribe([code], [self.sdk.SubType.QUOTE], subscribe_push=True)
-            if ret != self.sdk.RET_OK:
-                errors.append(f"{code}：{data}")
-                continue
+            if code not in self.quote_subscriptions:
+                if len(self.quote_subscriptions) >= 30:
+                    oldest = self.quote_subscriptions[0]
+                    ret, data = self.ctx.unsubscribe([oldest], [self.sdk.SubType.QUOTE])
+                    if ret != self.sdk.RET_OK:
+                        errors.append(f'释放报价订阅失败：{data}'); continue
+                    self.quote_subscriptions.pop(0)
+                ret, data = self.ctx.subscribe([code], [self.sdk.SubType.QUOTE], subscribe_push=True)
+                if ret != self.sdk.RET_OK:
+                    errors.append(f"{code}：{data}"); continue
+                self.quote_subscriptions.append(code)
             ret, data = self.ctx.get_stock_quote([code])
             if ret == self.sdk.RET_OK:
                 self.event.emit(self.token, "quotes", data.to_dict("records"))
@@ -133,11 +160,17 @@ class GatewayWorker(QObject):
         key = (code, subtype)
         if key not in self.subscriptions:
             if len(self.subscriptions) >= 60:
-                raise RuntimeError("本次连接已订阅 60 组 K 线，请重新连接释放订阅")
+                oldest = self.kline_order[0]
+                ret, data = self.ctx.unsubscribe([oldest[0]], [oldest[1]])
+                if ret != self.sdk.RET_OK: raise RuntimeError(f'释放 K 线订阅失败：{data}')
+                self.subscriptions.remove(oldest); self.kline_order.pop(0)
             ret, data = self.ctx.subscribe([code], [subtype], subscribe_push=True)
             if ret != self.sdk.RET_OK:
                 raise RuntimeError(str(data))
             self.subscriptions.add(key)
+            self.kline_order.append(key)
+        else:
+            self.kline_order.remove(key); self.kline_order.append(key)
         ret, data = self.ctx.get_cur_kline(code, 200, ktype=subtype, autype=self.sdk.AuType.QFQ)
         if ret != self.sdk.RET_OK:
             raise RuntimeError(str(data))

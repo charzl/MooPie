@@ -4,11 +4,12 @@ from PySide6.QtCore import Qt, QSettings, QTimer, QUrl, QItemSelectionModel
 from PySide6.QtGui import QDesktopServices, QShortcut, QKeySequence
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QTableView, QHeaderView, QAbstractItemView, QSplitter, QDialog, QFormLayout,
-    QSpinBox, QCheckBox, QDialogButtonBox, QInputDialog, QMessageBox, QMenu)
+    QSpinBox, QCheckBox, QDialogButtonBox, QInputDialog, QMessageBox, QMenu, QStackedWidget)
 from .market import (DEFAULT_SYMBOLS, NAMES, PERIODS, symbol, demo_quote, demo_candles,
                      Quote, parse_candles, merge_candles, compact)
 from .gateway import Gateway
 from .runtime import OpenDRuntime
+from .account_ui import WatchlistDialog, AccountsDialog
 from .chart import CandleChart, BG, TEXT, MUTED, RED, GREEN, ORANGE
 from .table import QuoteTableModel, QuoteDelegate
 
@@ -51,7 +52,7 @@ class MainWindow(QMainWindow):
                 if code not in codes: codes.append(code)
             except ValueError:
                 pass
-        self.state = SimpleNamespace(symbols=codes[:30] or list(DEFAULT_SYMBOLS), favorites=set(self.settings.value("favorites",["US.PLTR","US.NVDA","US.AAPL"])),
+        self.state = SimpleNamespace(symbols=codes or list(DEFAULT_SYMBOLS), names=self.settings.value('names', {}) or {}, favorites=set(self.settings.value("favorites",["US.PLTR","US.NVDA","US.AAPL"])),
                                      quotes={}, sparks={}, red_up=self.settings.value("red_up",True,type=bool))
         self.selected = self.state.symbols[0]
         self.period="日K"
@@ -61,6 +62,7 @@ class MainWindow(QMainWindow):
         self.closing=False
         self.closed=False
         self.pending_quotes={}
+        self.account_page = None
         self.gateway=Gateway(self)
         self.runtime = OpenDRuntime(self)
         self.runtime.status.connect(self.set_message)
@@ -82,9 +84,13 @@ class MainWindow(QMainWindow):
         sidebar=QWidget(); sidebar.setObjectName("sidebar"); sidebar.setFixedWidth(112)
         side=QVBoxLayout(sidebar); side.setContentsMargins(7,20,7,15); side.setSpacing(8)
         avatar=QLabel("◉"); avatar.setStyleSheet("font-size:32px;color:#939caa;padding:10px;"); side.addWidget(avatar)
+        self.nav_buttons = {}
         for name,icon in [("账户","▣"),("图表","▥"),("期权","⌁"),("观察","◎"),("市场","◉"),("自定义","⊞"),("发现","◈")]:
-            b=QPushButton(f"{icon}  {name}"); b.setObjectName("nav"); b.setCheckable(name=="图表"); b.setChecked(name=="图表")
-            if name != "图表": b.clicked.connect(lambda:QMessageBox.information(self,"看盘客户端","当前实现自选股、报价和 K 线。账户、交易、期权链与社区尚未实现。"))
+            b=QPushButton(f"{icon}  {name}"); b.setObjectName("nav"); b.setCheckable(name in ('账户','图表')); b.setChecked(name=="图表")
+            self.nav_buttons[name] = b
+            if name == '账户': b.clicked.connect(self.show_accounts)
+            elif name == '图表': b.clicked.connect(self.show_charts)
+            elif name != "图表": b.clicked.connect(lambda:QMessageBox.information(self,"看盘客户端","当前实现行情、自选分组导入及只读账户查询。交易、期权链与社区尚未实现。"))
             side.addWidget(b)
         side.addStretch()
         b=QPushButton("⊕  添加自选"); b.clicked.connect(self.add_symbol); side.addWidget(b)
@@ -104,6 +110,7 @@ class MainWindow(QMainWindow):
         watch=QWidget(); watchbox=QVBoxLayout(watch); watchbox.setContentsMargins(5,0,5,0); watchbox.setSpacing(0)
         heading=QHBoxLayout(); heading.setContentsMargins(9,10,9,10)
         self.count_label=QLabel("自选股"); heading.addWidget(self.count_label); heading.addStretch()
+        cloud=QPushButton('moomoo 自选'); cloud.clicked.connect(self.show_watchlist); heading.addWidget(cloud)
         add=QPushButton("+"); add.setFixedSize(24,24); add.clicked.connect(self.add_symbol); heading.addWidget(add); watchbox.addLayout(heading)
         filters=QHBoxLayout(); filters.setContentsMargins(6,5,6,10); filters.setSpacing(5)
         self.filter_buttons={}
@@ -150,13 +157,15 @@ class MainWindow(QMainWindow):
         self.status=QLabel(); self.status.setStyleSheet("font-size:10px;"); statusrow.addWidget(self.status,1)
         self.time_label=QLabel(); self.time_label.setStyleSheet("color:#939caa;font-size:10px;"); statusrow.addWidget(self.time_label)
         bottom=QWidget(); bottom.setFixedHeight(27); bottom.setLayout(statusrow); vertical.addWidget(bottom)
-        outer.addWidget(body,1); self.setCentralWidget(root); self.setStyleSheet(STYLE)
+        self.pages = QStackedWidget(); self.pages.addWidget(body)
+        outer.addWidget(self.pages,1); self.setCentralWidget(root); self.setStyleSheet(STYLE)
 
     def set_message(self,text):
         self.status.setText(text[:160]); self.status.setToolTip(text)
 
     def persist(self):
         self.settings.setValue("symbols",self.state.symbols)
+        self.settings.setValue('names', self.state.names)
         self.settings.setValue("favorites",list(self.state.favorites))
         self.settings.setValue("red_up",self.state.red_up)
 
@@ -198,7 +207,7 @@ class MainWindow(QMainWindow):
         self.chart.message="正在连接 OpenD…"; self.mode_label.setText("连接中"); self.health_timer.stop()
         self.set_message("正在连接本机 OpenD…"); self.update_table(); self.update_heading()
         self.settings.setValue("host",host); self.settings.setValue("port",port)
-        self.gateway.send("connect",self.token,host=host,port=port,symbols=list(self.state.symbols))
+        self.gateway.send("connect",self.token,host=host,port=port,symbols=list(self.state.symbols[:30]))
 
     def on_event(self,token,kind,data):
         if token != self.token or self.closing:
@@ -256,7 +265,8 @@ class MainWindow(QMainWindow):
         self.selected=code; self.chart_request=uuid.uuid4().hex; self.update_table(); self.update_heading()
         if self.mode=="demo":
             self.chart.message=""; self.chart.set_bars(demo_candles(code,self.period),self.period)
-        elif self.mode=="live": self.load_chart()
+        elif self.mode=="live":
+            self.gateway.send('refresh', self.token, symbols=[code]); self.load_chart()
         else: self.chart.set_bars([]); self.chart.message="连接 OpenD 以获取 K 线"
 
     def load_chart(self):
@@ -266,7 +276,8 @@ class MainWindow(QMainWindow):
 
     def refresh(self):
         if self.mode=="live":
-            self.gateway.send("refresh",self.token,symbols=list(self.state.symbols)); self.load_chart()
+            codes = [self.selected] + [c for c in self.state.symbols if c != self.selected][:29]
+            self.gateway.send("refresh",self.token,symbols=codes); self.load_chart()
         elif self.mode=="demo": self.select_symbol(self.selected)
         else: self.connection_settings()
 
@@ -299,7 +310,6 @@ class MainWindow(QMainWindow):
         try:
             code=symbol(value)
             if code not in self.state.symbols:
-                if len(self.state.symbols)>=30: raise ValueError("最多支持 30 只自选股")
                 self.state.symbols.append(code); self.persist()
                 if self.mode=="demo":
                     self.state.quotes[code]=demo_quote(code); self.state.sparks[code]=[b.close for b in demo_candles(code)[-60:]]
@@ -322,6 +332,45 @@ class MainWindow(QMainWindow):
             if self.mode=="live": self.gateway.send("remove",self.token,code=code)
             if self.selected==code: self.select_symbol(self.state.symbols[0])
         self.persist(); self.update_table(True)
+
+    def show_accounts(self):
+        if self.mode != 'live':
+            self.nav_buttons['账户'].setChecked(False)
+            self.set_message('请先连接 OpenD，再读取账户'); self.connection_settings(); return
+        if self.account_page is None or self.account_page.session != self.token:
+            if self.account_page is not None:
+                self.account_page.cleanup(); self.pages.removeWidget(self.account_page); self.account_page.deleteLater()
+            self.account_page = AccountsDialog(self); self.pages.addWidget(self.account_page)
+        self.pages.setCurrentWidget(self.account_page)
+        self.nav_buttons['账户'].setChecked(True); self.nav_buttons['图表'].setChecked(False)
+
+    def show_charts(self):
+        self.pages.setCurrentIndex(0)
+        self.nav_buttons['账户'].setChecked(False); self.nav_buttons['图表'].setChecked(True)
+
+    def show_watchlist(self):
+        if self.mode != 'live':
+            self.set_message('请先连接 OpenD，再读取账号自选股'); self.connection_settings(); return
+        WatchlistDialog(self).exec()
+
+    def import_watchlist(self, rows, group):
+        codes = []; names = {}; skipped = 0
+        for row in rows:
+            try: code = symbol(row.get('code', ''))
+            except (ValueError, AttributeError): skipped += 1; continue
+            if code not in codes: codes.append(code)
+            if isinstance(row.get('name'), str): names[code] = row['name']
+        if not codes:
+            self.set_message('分组为空或没有当前支持的 US/HK/SH/SZ 标的，本地列表保留'); return
+        self.settings.setValue('watchlist_backup', self.state.symbols)
+        for code in self.state.symbols:
+            if code not in codes: self.gateway.send('remove', self.token, code=code)
+        self.state.symbols = codes; self.state.names = names
+        self.state.quotes.clear(); self.state.sparks.clear(); self.pending_quotes.clear()
+        self.search.clear(); self.change_filter('全部'); self.selected = codes[0]
+        self.persist(); self.update_table(True); self.select_symbol(codes[0])
+        self.gateway.send('refresh', self.token, symbols=codes[1:30])
+        self.set_message(f'已导入 {group}：{len(codes)} 个标的；跳过 {skipped} 个不支持的标的。最多同时订阅 30 只报价，其余选中后读取')
 
     def connection_settings(self):
         dialog=QDialog(self); dialog.setWindowTitle("连接 OpenD"); dialog.setFixedWidth(450)

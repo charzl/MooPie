@@ -35,6 +35,7 @@ class Peer(socketserver.BaseRequestHandler):
                 if len(buffer)<44+length: break
                 body=buffer[44:44+length]; buffer=buffer[44+length:]
                 if flag!=b'FT' or fmt!=0 or hashlib.sha1(body).digest()!=digest: return
+                self.server.protocols.append(protocol)
                 push=b''
                 if protocol==1001:
                     payload=integer(1,1011)+integer(2,1)+integer(3,123)+text(4,'0123456789abcdef')+integer(5,10)+integer(7,1)
@@ -43,6 +44,23 @@ class Peer(socketserver.BaseRequestHandler):
                     payload=b''.join(integer(k,0) for k in range(1,6))+integer(6,1)+integer(7,0)+integer(8,1011)+integer(9,7108)+integer(10,int(time.time()))+integer(16,123)
                     reply=response(payload)
                 elif protocol==1004: reply=response(integer(1,int(time.time())))
+                elif protocol==3222:
+                    reply=response(message(1,text(1,'My watchlist')+integer(2,1)))
+                elif protocol==3213:
+                    basic=message(1,security())+integer(2,123)+integer(3,1)+integer(4,3)+text(5,'Apple')+text(6,'1980-12-12')
+                    reply=response(message(1,message(1,basic)))
+                elif protocol==2001:
+                    account=integer(1,1)+integer(2,9007199254740993)+integer(3,2)+integer(4,2)+integer(6,2)
+                    reply=response(message(1,account))
+                elif protocol==2008: reply=response()
+                elif protocol in (2101,2102):
+                    header=integer(1,1)+integer(2,9007199254740993)+integer(3,2)
+                    if protocol==2101:
+                        funds=b''.join(double(k,v) for k,v in [(1,1000),(2,1200),(3,100),(4,1100),(5,0),(6,0),(7,100)])+integer(8,2)
+                        reply=response(message(1,header)+message(2,funds))
+                    else:
+                        position=integer(1,10)+integer(2,0)+text(3,'AAPL')+text(4,'Apple')+b''.join(double(k,v) for k,v in [(5,10),(6,10),(7,110),(8,100),(9,1100),(10,100),(11,10)])+integer(12,2)+integer(30,2)+integer(31,2)
+                        reply=response(message(1,header)+message(2,position))
                 elif protocol in (3001,3002):
                     reply=response(error='mock entitlement denied') if self.server.reject else response()
                 elif protocol==3004:
@@ -60,6 +78,7 @@ class Server(socketserver.ThreadingTCPServer):
     allow_reuse_address=True; daemon_threads=True
     def __init__(self,port=0,reject=False,disconnect_after_quote=False):
         self.reject=reject; self.disconnect_after_quote=disconnect_after_quote
+        self.protocols=[]
         super().__init__(('127.0.0.1',port),Peer)
     def start(self):
         self.thread=threading.Thread(target=self.serve_forever,daemon=True); self.thread.start(); return self

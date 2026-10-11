@@ -25,7 +25,7 @@ class QuoteTableModel(QAbstractTableModel):
                       self.filter == "美股" and code.startswith("US.") or self.filter == "港股" and code.startswith("HK.") or
                       self.filter == "沪深" and code.startswith(("SH.","SZ."))) and
                      (not self.search or self.search.upper() in code or
-                      self.search.casefold() in (state.quotes.get(code).name if code in state.quotes else NAMES.get(code,code)).casefold())]
+                      self.search.casefold() in (state.quotes.get(code).name if code in state.quotes else getattr(state, 'names', {}).get(code, NAMES.get(code,code))).casefold())]
         if self.sort_column >= 0:
             def key(code):
                 q = state.quotes.get(code)
@@ -52,7 +52,7 @@ class QuoteTableModel(QAbstractTableModel):
             return code
         if role == Qt.ItemDataRole.DisplayRole:
             if index.column() == 0:
-                return quote.name if quote else NAMES.get(code,code)
+                return quote.name if quote else getattr(self.state, 'names', {}).get(code, NAMES.get(code,code))
             if not quote:
                 return "—"
             return {1:"",2:f"{quote.price:.3f}",3:f"{quote.percent:+.2f}%",4:f"{quote.change:+.3f}"}.get(index.column(),"")
