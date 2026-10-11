@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import MooBridge
 
 struct MooSwiftApp: App {
     @StateObject private var model = MarketModel()
@@ -26,6 +27,14 @@ struct MooSwiftApp: App {
 @main
 enum Launcher {
     @MainActor static func main() {
+        if CommandLine.arguments.contains("--sdk-check") {
+            let version = String(cString: moo_cpp_sdk_version())
+            if let path = Bundle.main.resourceURL?.appendingPathComponent("build-manifest.json"), let data = try? Data(contentsOf: path), let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let sdk = manifest["sdk"] as? [String: Any], let expected = sdk["version"] as? String {
+                guard version == expected else { fputs("SDK version mismatch\n", stderr); exit(1) }
+            }
+            let data = try! JSONSerialization.data(withJSONObject: ["sdk_version": version, "implementation": "swiftui-cpp"])
+            print(String(decoding: data, as: UTF8.self)); return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--benchmark-output"), CommandLine.arguments.count > index + 1 {
             Benchmark.run(output: CommandLine.arguments[index + 1]); return
         }

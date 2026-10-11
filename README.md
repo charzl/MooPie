@@ -13,12 +13,12 @@
 
 打开仓库 **Actions → Package macOS clients → 成功的运行 → Artifacts**：
 
-- `MooPython-macos-arm64`：应用 ZIP、界面预览、包体积 JSON 与逐轮性能记录。
-- `MooSwiftCpp-macos-arm64`：应用 ZIP、界面预览、包体积 JSON 与逐轮性能记录。
+- `MooPython-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 与逐轮性能记录。
+- `MooSwiftCpp-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 与逐轮性能记录。
 
 还有 `macOS-performance-comparison`，包含对比表和原始结果，可直接在 Compare benchmark results 的 Summary 中查看。
 
-外层 artifact ZIP 解压后，再解压内部应用 ZIP。当前为 Apple Silicon，系统要求 macOS 14 或以上。应用为 ad-hoc 签名，未使用 Apple Developer ID，也未公证；首次打开可能需要在系统隐私与安全设置中允许运行。
+外层 artifact ZIP 解压后，打开 DMG，将应用拖入 Applications。也可从仓库 Releases 直接下载 DMG。当前为 Apple Silicon，系统要求 macOS 14 或以上。客户端为 ad-hoc 签名，尚未公证；首次打开可能需要在系统隐私与安全设置中允许运行。内置 OpenD 保留官方签名。
 
 每次推送 main、创建 PR、推送 v 开头的 tag 都会触发构建；也可在 Actions 页面点 **Run workflow**。使用 GitHub 托管 macOS 15 runner，无需在个人 Mac 上安装 runner。产物保留 14 天。构建会下载并打包真实官方 OpenD；预览使用演示数据，无需账号、预先安装 OpenD 或 secret。
 
@@ -67,7 +67,7 @@ On normal app startup, the native `OpenDManager` helper installs a shared runtim
 
 Updates are checked on startup (at most once per 24 hours) and every 24 hours while a client stays open. Settings provide **Launch / Login**, **Check updates**, and **Rollback**. The updater uses moomoo's latest-link endpoint and the official Futu endpoint as a version-only fallback; it always downloads the **moomoo** artifact over HTTPS. It checks bundle identity, expected version, CPU architecture, and the official publisher's signature before atomically changing the selected version. The currently running gateway is not restarted. Quit the official OpenD and launch it again to use the newly staged version; the preceding version remains available for rollback. Concurrent updates are prevented with a process lock. Failed downloads, invalid signatures and invalid packages leave the selected version unchanged. A launch-command failure attempts the previous version; failures after launch or account login still require manual rollback.
 
-OpenD updates do **not** rewrite the Python or C++ SDK inside a signed/frozen client. SDK versions remain pinned and must be updated, tested and rebuilt when an API change requires it. Updating OpenD alone cannot guarantee perpetual API compatibility.
+OpenD updates do **not** rewrite the Python or C++ SDK inside a signed/frozen client. Local builds use pinned SDK versions; CI automatically resolves official SDK updates, tests and rebuilds both clients, and publishes new installers only when all checks pass. Updating OpenD alone cannot guarantee perpetual API compatibility.
 
 The official GUI OpenD currently occupies about **735 MiB**, so it dominates both package sizes. There is also one shared runtime copy on first launch, plus retained versions and official caches; previous small client-only package sizes no longer describe these bundles. UI benchmark CPU/RSS still measures only the client process, without a logged-in OpenD. Live end-to-end resource comparisons need a logged-in gateway on the same Mac.
 
@@ -78,3 +78,15 @@ swift test --package-path runtime
 python3 scripts/smoke-opend.py apps/python/dist/MooPython.app artifacts/python-opend-smoke.json
 python3 scripts/smoke-opend.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swift-cpp-opend-smoke.json
 ```
+
+## Automatic CI upgrades and DMG releases
+
+[Releases](https://github.com/charzl/moomoo-clients/releases) contains both drag-to-Applications DMG installers as experimental prereleases. The workflow checks official SDK/OpenD versions daily, on main pushes and on manual dispatch. A matching SDK/OpenD pair is resolved once for both clients. The official Python source distribution is hash-pinned and the matching C++ source archive is downloaded and verified; SDK directories, bundled dependency archives and dylib identities are read from build metadata instead of a fixed version path.
+
+Upgrades happen in ephemeral CI checkouts, without automatically changing the main branch. Local source defaults stay pinned in `runtime/sdk.json` and `runtime/opend.json`. Each release includes `resolved-build.json` with the actual source commit, SDK/OpenD versions, official URLs and SHA-256 hashes, plus `SHA256SUMS.txt` for both installers.
+
+Publication requires both client test suites, real OpenD update/startup acceptance, mounted-DMG identity/signature checks and benchmark report validation. Downloads, hashes, incompatible versions, compilation or tests failing prevent publication; the previous Release is never overwritten. Breaking API changes may still require changes to our adapter code; CI does not automatically repair application code.
+
+Already published source/version combinations skip the expensive builds. Manual dispatch offers `force` to create another build. Both installers are uploaded to a draft first; the draft becomes public only when every asset's name and size is verified. Releases persist; Actions artifacts expire after 14 days. GitHub scheduled workflows can run late and must remain enabled on the default branch.
+
+Installed OpenD's own automatic updates and CI's SDK-driven client rebuilds are separate. Download the new client DMG from Releases to replace an installed client.

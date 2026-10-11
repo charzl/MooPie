@@ -14,7 +14,12 @@ def main():
     if args.sdk_check:
         import moomoo
         assert callable(moomoo.OpenQuoteContext)
-        print("Official moomoo SDK import passed")
+        import json,pathlib
+        manifest=pathlib.Path(sys.executable).resolve().parent.parent/'Resources/build-manifest.json'
+        if getattr(sys,'frozen',False):
+            expected=json.loads(manifest.read_text())['sdk']['version']
+            assert moomoo.__version__==expected, f'SDK version mismatch: {moomoo.__version__} vs {expected}'
+        print(json.dumps(dict(sdk_version=moomoo.__version__,implementation='python-qt')))
         return 0
     if args.benchmark_output:
         os.environ["QT_QPA_PLATFORM"]="offscreen"

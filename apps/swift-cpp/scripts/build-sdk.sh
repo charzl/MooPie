@@ -2,22 +2,27 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-SDK="$ROOT/vendor/MMAPI4CPP_10.11.7108"
+SDK_REL=$(python3 -c 'import json;print(json.load(open("sdk.json"))["source_dir"])')
+SDK="$ROOT/$SDK_REL"
+PROTO_NAME=$(python3 -c 'import pathlib,sys; a=list(pathlib.Path(sys.argv[1]).glob("protobuf-*.tar.gz")); assert len(a)==1,"Expected one protobuf source archive"; print(a[0].name[:-7])' "$SDK/ThirdLibSrc")
+SSL_NAME=$(python3 -c 'import pathlib,sys; a=list(pathlib.Path(sys.argv[1]).glob("openssl-*.tar.gz")); assert len(a)==1,"Expected one OpenSSL source archive"; print(a[0].name[:-7])' "$SDK/ThirdLibSrc")
 PREFIX="$ROOT/thirdlib"
 JOBS="${BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
 mkdir -p "$PREFIX" build-deps
 if [[ ! -x "$PREFIX/bin/protoc" ]]; then
-  tar -xzf "$SDK/ThirdLibSrc/protobuf-3.21.5.tar.gz" -C build-deps
-  cmake -S build-deps/protobuf-3.21.5/cmake -B build-deps/protobuf-build \
+  tar -xzf "$SDK/ThirdLibSrc/${PROTO_NAME}.tar.gz" -C build-deps
+  PROTO_CMAKE="build-deps/${PROTO_NAME}"
+  if [[ -f "$PROTO_CMAKE/cmake/CMakeLists.txt" ]]; then PROTO_CMAKE="$PROTO_CMAKE/cmake"; fi
+  cmake -S "$PROTO_CMAKE" -B build-deps/protobuf-build \
     -Dprotobuf_BUILD_TESTS=OFF -Dprotobuf_BUILD_SHARED_LIBS=ON \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
   cmake --build build-deps/protobuf-build --parallel "$JOBS"
   cmake --install build-deps/protobuf-build
 fi
-if [[ ! -f "$PREFIX/lib/libssl.3.dylib" ]]; then
-  tar -xzf "$SDK/ThirdLibSrc/openssl-3.0.17.tar.gz" -C build-deps
-  pushd build-deps/openssl-3.0.17
+if [[ ! -f "$PREFIX/lib/libssl.dylib" ]]; then
+  tar -xzf "$SDK/ThirdLibSrc/${SSL_NAME}.tar.gz" -C build-deps
+  pushd build-deps/${SSL_NAME}
   if [[ "$(uname -m)" == arm64 ]]; then TARGET=darwin64-arm64-cc; else TARGET=darwin64-x86_64-cc; fi
   ./Configure "$TARGET" shared no-tests --prefix="$PREFIX" --libdir=lib -mmacosx-version-min=14.0
   make -j "$JOBS"

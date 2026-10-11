@@ -7,7 +7,9 @@ python3 -m PyInstaller --noconfirm --clean --windowed --name MooPython \
 codesign --force --deep --sign - dist/MooPython.app
 python3 ../../scripts/bundle-opend.py dist/MooPython.app
 # Preserve the nested official publisher signature.
+python3 ../../scripts/stamp-build.py dist/MooPython.app
 codesign --force --sign - dist/MooPython.app
 codesign --verify --deep --strict dist/MooPython.app
-ditto -c -k --sequesterRsrc --keepParent dist/MooPython.app "dist/MooPython-macos-$(uname -m).zip"
 du -sh dist/MooPython.app
+
+python3 ../../scripts/package-dmg.py dist/MooPython.app "dist/MooPython-macos-$(uname -m).dmg"

@@ -18,7 +18,7 @@ def prepare():
         for block in iter(lambda:f.read(1024*1024),b''): digestor.update(block)
     digest=digestor.hexdigest()
     if digest!=META['sha256']: raise RuntimeError('Official archive SHA-256 mismatch; remove corrupt cached archive and retry')
-    app=cache/'pristine/moomoo_OpenD.app'
+    app=cache/f"pristine-{META['version']}/moomoo_OpenD.app"
     if not app.exists():
         with tempfile.TemporaryDirectory(dir=cache) as work:
             stage=pathlib.Path(work); version=META['version']

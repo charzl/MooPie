@@ -1,5 +1,7 @@
 #include "MooBridge.h"
 #include "MMAPIChannel.h"
+#include "MMAPI_Define.h"
+extern "C" const char *moo_cpp_sdk_version(void) { return MMAPI_VERSION; }
 #include "Proto/Qot_Sub.pb.h"
 #include "Proto/Qot_GetBasicQot.pb.h"
 #include "Proto/Qot_UpdateBasicQot.pb.h"

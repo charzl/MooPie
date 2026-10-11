@@ -4,6 +4,7 @@
 extern "C" {
 #endif
 typedef void (*MooCallback)(void *, int, uint32_t, uint32_t, const char *);
+const char *moo_cpp_sdk_version(void);
 void *moo_cpp_create(MooCallback callback, void *context);
 int moo_cpp_connect(void *handle, const char *host, uint16_t port);
 uint32_t moo_cpp_request(void *handle, uint32_t protocol_id, const char *json);

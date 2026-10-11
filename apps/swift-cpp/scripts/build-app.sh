@@ -17,13 +17,15 @@ path.write_bytes(plistlib.dumps(dict(CFBundleName='MooSwiftCpp',CFBundleDisplayN
  CFBundleIconFile='AppIcon.icns',CFBundleIdentifier='local.charlie.mooswiftcpp',CFBundleExecutable='MooSwiftCpp',CFBundlePackageType='APPL',
  CFBundleShortVersionString='0.1.0',CFBundleVersion='1',LSMinimumSystemVersion='14.0',NSHighResolutionCapable=True)))
 PY
-for LIB in libprotobuf.32.dylib libssl.3.dylib libcrypto.3.dylib; do
-  cp -L "thirdlib/lib/$LIB" "$APP_DIR/Contents/Frameworks/$LIB"
+for COMPONENT in protobuf ssl crypto; do
+  SOURCE="thirdlib/lib/lib${COMPONENT}.dylib"
+  LIB=$(otool -D "$SOURCE" | tail -1 | xargs basename)
+  cp -L "$SOURCE" "$APP_DIR/Contents/Frameworks/$LIB"
   install_name_tool -id "@rpath/$LIB" "$APP_DIR/Contents/Frameworks/$LIB"
 done
 python3 - "$APP_DIR" <<'PY'
 import pathlib,sys,subprocess
-app=pathlib.Path(sys.argv[1]); libraries={'libprotobuf.32.dylib','libssl.3.dylib','libcrypto.3.dylib'}
+app=pathlib.Path(sys.argv[1]); libraries={p.name for p in (app/'Contents/Frameworks').glob('*.dylib')}
 files=[app/'Contents/MacOS/MooSwiftCpp',*(app/'Contents/Frameworks').iterdir()]
 for file in files:
  output=subprocess.check_output(['otool','-L',str(file)],text=True)
@@ -42,11 +44,22 @@ for file in files:
 subprocess.check_call(['install_name_tool','-add_rpath','@executable_path/../Frameworks',str(files[0])])
 PY
 mkdir -p "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES"
-tar -xOf vendor/MMAPI4CPP_10.11.7108/ThirdLibSrc/protobuf-3.21.5.tar.gz protobuf-3.21.5/LICENSE > "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES/protobuf-LICENSE"
-tar -xOf vendor/MMAPI4CPP_10.11.7108/ThirdLibSrc/openssl-3.0.17.tar.gz openssl-3.0.17/LICENSE.txt > "$APP_DIR/Contents/Resources/THIRD_PARTY_LICENSES/openssl-LICENSE.txt"
+python3 - "$APP_DIR" <<'PYLICENSE'
+import json,pathlib,sys,tarfile
+sdk=pathlib.Path(json.loads(pathlib.Path('sdk.json').read_text())['source_dir'])
+dest=pathlib.Path(sys.argv[1])/'Contents/Resources/THIRD_PARTY_LICENSES'
+for component in ('protobuf','openssl'):
+ archives=list((sdk/'ThirdLibSrc').glob(component+'-*.tar.gz')); assert len(archives)==1
+ with tarfile.open(archives[0]) as tar:
+  names=[n for n in tar.getnames() if pathlib.PurePosixPath(n).name in ('LICENSE','LICENSE.txt') and len(pathlib.PurePosixPath(n).parts)==2]
+  assert len(names)==1, 'Expected a root dependency license'
+  dest.joinpath(component+'-LICENSE.txt').write_bytes(tar.extractfile(names[0]).read())
+PYLICENSE
 for LIB in "$APP_DIR"/Contents/Frameworks/*.dylib; do codesign --force --sign - "$LIB"; done
 python3 ../../scripts/bundle-opend.py "$APP_DIR"
+python3 ../../scripts/stamp-build.py "$APP_DIR"
 codesign --force --sign - "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
-ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "dist/MooSwiftCpp-macos-$(uname -m).zip"
 du -sh "$APP_DIR"
+
+python3 ../../scripts/package-dmg.py "$APP_DIR" "dist/MooSwiftCpp-macos-$(uname -m).dmg"
