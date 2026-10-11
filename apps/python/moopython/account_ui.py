@@ -1,6 +1,7 @@
 """On-demand, asynchronous account and official watchlist dialogs."""
 import math
 import uuid
+from .market import display_symbol
 from PySide6.QtCore import QTimer, Qt, QSize, QDate
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QTableWidget, QTableWidgetItem, QAbstractItemView, QWidget, QTabWidget, QListWidget, QSplitter, QDateEdit
 
@@ -17,7 +18,8 @@ def table_rows(table, rows, columns):
     for index, row in enumerate(rows):
         for column, key in enumerate(columns):
             precision = 4 if key in ('nominal_price', 'average_cost_price') else 3 if key in ('qty', 'can_sell_qty') else 2
-            table.setItem(index, column, QTableWidgetItem(display(row.get(key), precision)))
+            value = display_symbol(row.get(key)) if key == 'code' else row.get(key)
+            table.setItem(index, column, QTableWidgetItem(display(value, precision)))
     table.resizeColumnsToContents()
 
 

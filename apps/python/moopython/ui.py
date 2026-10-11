@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
         side=QVBoxLayout(sidebar); side.setContentsMargins(7,20,7,15); side.setSpacing(8)
         avatar=QLabel("◉"); avatar.setStyleSheet("font-size:32px;color:#939caa;padding:10px;"); side.addWidget(avatar)
         self.nav_buttons = {}
-        for name,icon in [("账户","▣"),("图表","▥"),("期权","⌁"),("观察","◎"),("市场","◉"),("自定义","⊞"),("发现","◈")]:
+        for name,icon in [("账户","▣"),("图表","▥"),("期权","⌁"),("观察","◎"),("市场","◉")]:
             b=QPushButton(f"{icon}  {name}"); b.setObjectName("nav"); b.setCheckable(name in ('账户','图表','期权','观察','市场')); b.setChecked(name=="图表")
             self.nav_buttons[name] = b
             if name == '账户': b.clicked.connect(self.show_accounts)
@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
             self.table.selectionModel().select(index,QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows)
         else:
             self.table.clearSelection()
-        self.count_label.setText(f"自选股  {len(self.table_model.rows)}")
+        self.count_label.setText(f"本地自选  {len(self.table_model.rows)}")
 
     def show_demo(self):
         self.token=uuid.uuid4().hex; self.chart_request=""; self.pending_quotes.clear()
@@ -259,9 +259,9 @@ class MainWindow(QMainWindow):
         self.quote_heading.setText(f"<b>⌕  {escape(self.selected.split('.',1)[1])}  {escape(name)}</b>   {suffix}")
         if q:
             self.stats.setText(f"开 {q.open:.3f}    高 {q.high:.3f}    低 {q.low:.3f}    收 {q.price:.3f}    量 {compact(q.volume)}    额 {compact(q.turnover)}")
-            self.time_label.setText(q.updated+"  ·  Python / Qt")
+            self.time_label.setText(q.updated)
         else:
-            self.stats.setText("等待行情数据"); self.time_label.setText("Python / Qt")
+            self.stats.setText("等待行情数据"); self.time_label.setText("")
 
     def select_symbol(self,code):
         self.selected=code; self.chart_request=uuid.uuid4().hex; self.update_table(); self.update_heading()
@@ -307,7 +307,7 @@ class MainWindow(QMainWindow):
     def toggle_ma(self): self.chart.show_ma=self.ma_button.isChecked(); self.chart.invalidate()
 
     def add_symbol(self):
-        value,ok=QInputDialog.getText(self,"添加自选股","US.AAPL / HK.00700 / SH.600519 / SZ.000001")
+        value,ok=QInputDialog.getText(self,"添加本地自选","仅保存在此 Mac，不同步到 moomoo 云端。\nPLTR / AAPL / HK.00700 / SH.600519 / SZ.000001")
         if not ok: return
         try:
             code=symbol(value)
@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
     def import_watchlist(self, rows, group):
         codes = []; names = {}; skipped = 0
         for row in rows:
-            try: code = symbol(row.get('code', ''))
+            try: code = symbol(row.get('code', ''),allow_short=False)
             except (ValueError, AttributeError): skipped += 1; continue
             if code not in codes: codes.append(code)
             if isinstance(row.get('name'), str): names[code] = row['name']

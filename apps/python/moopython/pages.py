@@ -3,16 +3,16 @@ import math
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QAbstractItemView, QTabWidget,
-    QHeaderView, QSplitter, QGridLayout)
+    QHeaderView, QSplitter, QGridLayout, QCheckBox)
 from PySide6.QtGui import QPainter, QColor, QPainterPath, QPen, QLinearGradient
 from .account_ui import QueryDialog, display
-from .market import symbol, NAMES
+from .market import symbol, display_symbol, NAMES
 
 SNAPSHOT_COLUMNS = [('code','代码'),('name','名称'),('last_price','最新价'),('change','涨跌额'),
     ('change_pct','涨跌幅 %'),('bid_price','买入价'),('ask_price','卖出价'),('bid_vol','买量'),
     ('ask_vol','卖量'),('volume','成交量'),('turnover','成交额'),('open_price','今开'),
     ('prev_close_price','昨收'),('high_price','最高'),('low_price','最低'),
-    ('turnover_rate','换手率 %'),('pe_ttm_ratio','市盈率 TTM'),('pb_ratio','市净率'),('update_time','更新时间')]
+    ('turnover_rate','换手率 %'),('pe_ttm_ratio','市盈率 TTM'),('pb_ratio','市净率'),('update_time','更新时间'),('quote_status','行情状态')]
 
 
 def snapshot_rows(rows):
@@ -41,7 +41,8 @@ def fill(table, rows, columns):
     table.setSortingEnabled(False); table.setRowCount(len(rows))
     for i,row in enumerate(rows):
         for j,(key,_) in enumerate(columns):
-            value = row.get(key); item = QTableWidgetItem(display(value,4 if key in ('last_price','bid_price','ask_price','strike_price') else 2))
+            value = display_symbol(row.get(key)) if key == 'code' else row.get(key)
+            item = QTableWidgetItem(display(value,4 if key in ('last_price','bid_price','ask_price','strike_price') else 2))
             if isinstance(value,(int,float)) and math.isfinite(value): item.setData(Qt.ItemDataRole.DisplayRole,value)
             if key in ('change','change_pct') and isinstance(value,(int,float)) and math.isfinite(value):
                 from PySide6.QtGui import QColor
@@ -72,7 +73,7 @@ class DataPage(QueryDialog):
 class ObservePage(DataPage):
     def __init__(self, window):
         super().__init__(window,'观察 · 自选')
-        bar = QHBoxLayout(); self.groups = QComboBox(); self.groups.addItem('本地自选',None); bar.addWidget(self.groups)
+        bar = QHBoxLayout(); self.groups = QComboBox(); self.groups.addItem('本地自选 · 此 Mac',None); bar.addWidget(self.groups)
         groups = QPushButton('账号自选分组'); groups.clicked.connect(self.load_groups); bar.addWidget(groups)
         refresh = QPushButton('刷新行情'); refresh.clicked.connect(self.load_group); bar.addWidget(refresh)
         self.search = QLineEdit(); self.search.setPlaceholderText('搜索代码 / 名称'); self.search.textChanged.connect(self.render); bar.addWidget(self.search,1)
@@ -84,7 +85,7 @@ class ObservePage(DataPage):
         footer.addWidget(self.previous); footer.addWidget(self.next); footer.addWidget(self.status,1); self.layout.addLayout(footer)
         self.controls = [self.groups,groups,refresh,self.previous,self.next]
         self.group_rows = []; self.page = 0; self.groups.currentIndexChanged.connect(self.load_group)
-        self.load_group()
+        if self.ready(): self.load_groups()
 
     def clear_data(self):
         self.rows = []; self.table.setRowCount(0)
@@ -102,7 +103,7 @@ class ObservePage(DataPage):
         if not self.ready(): return
         if self.groups.currentData() is None:
             self.group_rows = [dict(code=code,name=self.window.state.names.get(code,NAMES.get(code,''))) for code in self.window.state.symbols]; self.load_snapshots()
-        else: self.send('watchlist',group=self.groups.currentText())
+        else: self.send('watchlist',group=self.groups.currentData())
 
     def move_page(self,delta):
         candidate = self.page + delta
@@ -110,20 +111,30 @@ class ObservePage(DataPage):
 
     def load_snapshots(self):
         self.clear_data(); codes = [row['code'] for row in self.group_rows[self.page*200:(self.page+1)*200]]
-        if codes: self.send('snapshots',codes=codes)
+        if codes: self.send('market_snapshots',codes=codes)
         else: self.status.setText('此分组暂无标的')
 
     def result(self,data):
         if data['op'] == 'watchlist_groups':
-            self.groups.blockSignals(True); self.groups.clear(); self.groups.addItem('本地自选',None)
-            for row in data['rows']: self.groups.addItem(row['group_name'],row['group_name'])
-            self.groups.blockSignals(False); self.status.setText('选择账号分组查看自选行情')
+            self.groups.blockSignals(True); self.groups.clear(); self.groups.addItem('本地自选 · 此 Mac',None)
+            for row in data['rows']: self.groups.addItem(row['group_name']+' · 云端',row['group_name'])
+            if self.groups.count()>1: self.groups.setCurrentIndex(1)
+            self.groups.blockSignals(False); self.load_group()
         elif data['op'] == 'watchlist':
             self.group_rows = data['rows']; self.load_snapshots()
         else:
             names = {row['code']:row.get('name','') for row in self.group_rows}
-            self.rows = snapshot_rows([dict(row,name=row.get('name') or names.get(row['code'],'')) for row in data['rows']]); self.render()
-            self.status.setText(f'共 {len(self.group_rows)} 个标的 · 第 {self.page+1} 页 · 快照，点击刷新更新；双击打开图表')
+            returned = {row['code']:row for row in data['rows']}
+            failures = {code:failure['error'] for failure in data.get('errors',[]) for code in failure['codes']}
+            view = []
+            for stock in self.group_rows[self.page*200:(self.page+1)*200]:
+                code = stock['code']; row = dict(returned.get(code,dict(code=code)))
+                row['name'] = row.get('name') or names.get(code,'')
+                row['quote_status'] = failures.get(code,'快照' if code in returned else '暂无行情')
+                view.append(row)
+            self.rows = snapshot_rows(view); self.render()
+            source = 'moomoo 云端分组（只读）' if self.groups.currentData() is not None else '本地自选（仅此 Mac）'
+            self.status.setText(f'{source} · 共 {len(self.group_rows)} 个标的 · 第 {self.page+1} 页 · 快照，点击刷新更新；双击打开图表')
 
 
 OPTION_COLUMNS = [('code','合约代码'),('name','名称'),('strike_price','行权价'),('strike_time','到期日'),('lot_size','合约乘数')]
@@ -135,7 +146,7 @@ OPTION_QUOTE = [('last_price','最新价'),('bid_price','买价'),('ask_price','
 class OptionsPage(DataPage):
     def __init__(self, window):
         super().__init__(window,'期权')
-        bar = QHBoxLayout(); self.underlying = QLineEdit(window.selected); self.underlying.setPlaceholderText('US.AAPL / HK.00700'); bar.addWidget(self.underlying)
+        bar = QHBoxLayout(); self.underlying = QLineEdit(display_symbol(window.selected)); self.underlying.setPlaceholderText('PLTR / AAPL / HK.00700'); bar.addWidget(self.underlying)
         dates = QPushButton('获取到期日'); dates.clicked.connect(self.load_dates); bar.addWidget(dates)
         self.dates = QComboBox(); bar.addWidget(self.dates)
         chain = QPushButton('查询期权链'); chain.clicked.connect(self.load_chain); bar.addWidget(chain)
@@ -186,7 +197,7 @@ class OptionsPage(DataPage):
         row = table.currentRow() if row is None else row
         if row < 0: self.status.setText('先选择一个合约'); return
         code = table.item(row,0).data(Qt.ItemDataRole.UserRole)
-        self.quote_table.setRowCount(0); self.send('snapshots',codes=[code]); self.status.setText('读取合约 '+code+' 报价…')
+        self.quote_table.setRowCount(0); self.send('snapshots',codes=[code]); self.status.setText('读取合约 '+display_symbol(code)+' 报价…')
 
     def result(self,data):
         if data['op'] == 'option_dates':
@@ -199,14 +210,13 @@ class OptionsPage(DataPage):
             row = data['rows'][0] if data['rows'] else {}
             if not row: self.status.setText('未返回合约报价'); return
             fill(self.quote_table,[dict(field=label,value=row.get(key)) for key,label in OPTION_QUOTE],[('field','报价项目'),('value','数值')])
-            self.status.setText('合约 '+row.get('code','')+' · '+str(row.get('update_time','—'))+' · 快照，点击查询更新')
+            self.status.setText('合约 '+display_symbol(row.get('code',''))+' · '+str(row.get('update_time','—'))+' · 快照，点击查询更新')
 
 
 MARKETS = {
-    '市场总览': [('US.DIA','道琼斯 ETF'),('US.QQQ','纳斯达克 100 ETF'),('US.SPY','标普 500 ETF'),('HK.800000','恒生指数'),('SH.000001','上证指数'),('SZ.399001','深证成指'),('SZ.399006','创业板指')],
-    '美股 ETF': [('US.SPY','标普 500 ETF'),('US.QQQ','纳斯达克 100 ETF'),('US.DIA','道琼斯 ETF'),('US.IWM','罗素 2000 ETF')],
-    '港股': [('HK.00700','腾讯控股'),('HK.00981','中芯国际'),('HK.09988','阿里巴巴'),('HK.01810','小米集团')],
-    '沪深': [('SH.600519','贵州茅台'),('SH.601318','中国平安'),('SZ.000001','平安银行'),('SZ.300750','宁德时代')]
+    '美股': [('US.DIA','道琼斯 ETF'),('US.QQQ','纳斯达克 100 ETF'),('US.SPY','标普 500 ETF')],
+    '港股': [('HK.800000','恒生指数')],
+    '沪深': [('SH.000001','上证指数'),('SZ.399001','深证成指'),('SZ.399006','创业板指')]
 }
 
 
@@ -251,12 +261,25 @@ class MarketMap(QWidget):
 class MarketPage(DataPage):
     def __init__(self,window):
         super().__init__(window,'市场')
-        bar = QHBoxLayout(); self.category = QComboBox(); self.category.addItems(MARKETS); bar.addWidget(self.category)
+        bar = QHBoxLayout(); bar.addWidget(QLabel('关注市场：')); self.market_checks = {}
+        saved = window.settings.value('selected_markets',['美股'])
+        if isinstance(saved,str): saved = [saved]
+        for name in MARKETS:
+            check = QCheckBox(name); check.setChecked(name in saved); self.market_checks[name] = check; bar.addWidget(check)
         refresh = QPushButton('刷新市场快照'); refresh.clicked.connect(self.load); bar.addWidget(refresh); bar.addStretch(); self.layout.addLayout(bar)
         overview = QSplitter(); self.map = MarketMap(); overview.addWidget(self.map)
         self.cards_widget = QWidget(); self.cards = QGridLayout(self.cards_widget); overview.addWidget(self.cards_widget); overview.setSizes([850,400]); self.layout.addWidget(overview,2)
         self.table = make_table(SNAPSHOT_COLUMNS); self.table.cellDoubleClicked.connect(lambda row,col:self.open_row(self.table,row)); self.layout.addWidget(self.table,1)
-        self.layout.addWidget(self.status); self.controls = [self.category,refresh]; self.category.currentIndexChanged.connect(self.load); self.load()
+        self.layout.addWidget(self.status); self.controls = [*self.market_checks.values(),refresh]
+        for check in self.market_checks.values(): check.toggled.connect(self.selection_changed)
+        self.load()
+
+    def selected_symbols(self):
+        return [stock for name,stocks in MARKETS.items() if self.market_checks[name].isChecked() for stock in stocks]
+
+    def selection_changed(self,*_):
+        self.window.settings.setValue('selected_markets',[name for name,check in self.market_checks.items() if check.isChecked()])
+        self.load()
 
     def clear_data(self):
         self.rows = []; self.table.setRowCount(0); self.map.rows = []; self.map.update()
@@ -265,15 +288,26 @@ class MarketPage(DataPage):
             if item.widget(): item.widget().deleteLater()
 
     def load(self,*_):
-        self.clear_data()
-        if self.ready(): self.send('snapshots',codes=[code for code,name in MARKETS[self.category.currentText()]])
+        self.request = ''; self.clear_data()
+        stocks = self.selected_symbols()
+        if not stocks:
+            self.busy = False
+            for control in self.controls: control.setEnabled(True)
+            self.status.setText('请选择至少一个市场'); return
+        if self.ready(): self.send('market_snapshots',codes=[code for code,name in stocks])
 
     def result(self,data):
-        self.clear_data(); names = dict(MARKETS[self.category.currentText()]); self.rows = snapshot_rows([dict(row,name=names.get(row['code'],row.get('name',''))) for row in data['rows']])
-        fill(self.table,self.rows,SNAPSHOT_COLUMNS); self.map.rows = self.rows; self.map.setVisible(self.category.currentText() == '市场总览'); self.map.update()
-        for index,row in enumerate(self.rows):
+        self.clear_data(); names = dict(self.selected_symbols()); self.rows = snapshot_rows([dict(row,name=names[row['code']],quote_status='快照') for row in data['rows'] if row['code'] in names])
+        fill(self.table,self.rows,SNAPSHOT_COLUMNS); self.map.rows = self.rows; self.map.update()
+        failures = {code:failure['error'] for failure in data.get('errors',[]) for code in failure['codes']}
+        available = {row['code']:row for row in self.rows}
+        for index,(code,name) in enumerate(self.selected_symbols()):
+            row = available.get(code,dict(code=code,name=name))
             card = QWidget(); card.setStyleSheet('QWidget { border:1px solid #28313d; border-radius:5px; } QLabel { border:0; }'); box = QVBoxLayout(card)
             box.addWidget(QLabel(row['name'])); price = QLabel(display(row.get('last_price'))+'   '+display(row.get('change_pct'))+'%')
             change = row.get('change_pct',0); price.setStyleSheet('font-size:20px;color:'+('#f04458' if change > 0 else '#00b879' if change < 0 else '#939caa')+';border:0;'); box.addWidget(price)
-            box.addWidget(QLabel(str(row.get('update_time','—')))); self.cards.addWidget(card,index//2,index%2)
-        self.status.setText('市场快照 · 权限不足时显示错误 · 双击标的打开图表；期货、外汇和未覆盖的全球指数尚未接入')
+            note = QLabel('暂无权限或数据' if code in failures else str(row.get('update_time','—')))
+            if code in failures: note.setToolTip(failures[code]); card.setToolTip(failures[code])
+            box.addWidget(note); self.cards.addWidget(card,index//2,index%2)
+        details = '；'.join(failure['market']+': '+failure['error'] for failure in data.get('errors',[]))
+        self.status.setText(f'已显示 {len(self.rows)} 个标的 · '+(details if details else '市场快照 · 双击标的打开图表'))

@@ -3,6 +3,7 @@ import socket
 from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt
 from .market import PERIODS
 from .account_data import query_accounts, records
+from .market_data import query_market_snapshots
 
 class GatewayWorker(QObject):
     event = Signal(str, str, object)
@@ -69,7 +70,7 @@ class GatewayWorker(QObject):
                 return
             if op == "refresh":
                 self.refresh(command["symbols"])
-            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots'):
+            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots', 'market_snapshots'):
                 if op == 'watchlist_groups':
                     result = dict(rows=records(self.sdk, self.ctx.get_user_security_group()))
                 elif op == 'watchlist':
@@ -78,6 +79,8 @@ class GatewayWorker(QObject):
                     result = dict(rows=records(self.sdk, self.ctx.get_option_expiration_date(command['code'])))
                 elif op == 'option_chain':
                     result = dict(rows=records(self.sdk, self.ctx.get_option_chain(command['code'], start=command['date'], end=command['date'])))
+                elif op == 'market_snapshots':
+                    result = query_market_snapshots(self.sdk,self.ctx,command['codes'])
                 elif op == 'snapshots':
                     codes = list(dict.fromkeys(command['codes']))
                     if not 1 <= len(codes) <= 200: raise ValueError('每次快照查询需要 1–200 个标的')
@@ -112,7 +115,7 @@ class GatewayWorker(QObject):
                 self.event.emit(token, "connection_error", f"连接失败：{error}")
             elif op == "chart":
                 self.event.emit(token, "chart_error", {"request": command["request"], "message": str(error)})
-            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots'):
+            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots', 'market_snapshots'):
                 self.event.emit(token, 'user_data_error', dict(request=command['request'], error=str(error)))
             else:
                 self.event.emit(token, "message", str(error))
