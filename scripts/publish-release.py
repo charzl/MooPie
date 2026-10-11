@@ -7,7 +7,8 @@ def collect_artifacts(root):
  for client,prefix in zip(CLIENTS,('python','swift-cpp')):names.extend([f'{client}-macos-arm64.dmg',f'{client}-macos-arm64.validation.json',f'{prefix}-build.json',f'{prefix}-opend-smoke.json'])
  for name in names:
   matches=[path for path in root.rglob(name) if path.is_file()]
-  require(len(matches)==1,'Missing or ambiguous release asset: '+name)
+  require(bool(matches),'Missing release asset: '+name)
+  require(len({digest(path) for path in matches})==1,'Conflicting release assets: '+name)
   shutil.copyfile(matches[0],target/name)
  return target
 def require(condition,message):

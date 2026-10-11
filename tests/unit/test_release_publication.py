@@ -87,10 +87,20 @@ class PublicationTests(unittest.TestCase):
             import shutil
             shutil.rmtree(target)
 
-    def test_ambiguous_artifacts_rejected(self):
+    def test_identical_manifest_copies_are_accepted(self):
+        nested = self.root/'artifacts'; nested.mkdir()
+        (nested/'resolved-build.json').write_bytes((self.root/'resolved-build.json').read_bytes())
+        target = release.collect_artifacts(self.root)
+        try:
+            release.preflight(target, self.commit, min_bytes=1024)
+        finally:
+            import shutil
+            shutil.rmtree(target)
+
+    def test_conflicting_artifacts_rejected(self):
         nested = self.root/'duplicate'; nested.mkdir()
-        (nested/'resolved-build.json').write_text(json.dumps(self.manifest))
-        with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
+        (nested/'resolved-build.json').write_text(json.dumps(dict(self.manifest, source_commit='b'*40)))
+        with self.assertRaisesRegex(RuntimeError, 'Conflicting'):
             release.collect_artifacts(self.root)
         import shutil
         shutil.rmtree(self.root.with_name(self.root.name+'-normalized'))
