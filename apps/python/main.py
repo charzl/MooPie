@@ -3,7 +3,7 @@ import os
 import sys
 
 def main():
-    parser=argparse.ArgumentParser(description="MooPython desktop market client")
+    parser=argparse.ArgumentParser(description="MooPie desktop market client")
     parser.add_argument("--render-preview")
     parser.add_argument("--sdk-check", action="store_true")
     parser.add_argument("--benchmark-output")
@@ -31,7 +31,7 @@ def main():
     from PySide6.QtCore import QTimer
     from moopython.ui import MainWindow
     app=QApplication([sys.argv[0]])
-    app.setApplicationName("MooPython")
+    app.setApplicationName("MooPie")
     settings=None
     if args.benchmark_output:
         from PySide6.QtCore import QSettings

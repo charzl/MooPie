@@ -1,6 +1,6 @@
 """Preflight validated Python installer, then publish atomically through a draft."""
 import hashlib,json,os,pathlib,re,shutil,subprocess,sys
-CLIENTS=('MooPython',)
+CLIENTS=('MooPie',)
 def collect_artifacts(root):
  root=pathlib.Path(root);target=root.with_name(root.name+'-normalized');target.mkdir(parents=True,exist_ok=True)
  names=['resolved-build.json']

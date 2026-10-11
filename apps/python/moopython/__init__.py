@@ -1,1 +1,1 @@
-"""MooPython: standalone Qt desktop client using the official moomoo SDK."""
+"""MooPie: standalone Qt desktop client using the official moomoo SDK."""

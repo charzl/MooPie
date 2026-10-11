@@ -38,7 +38,7 @@ QMenu::item:selected { background:#343d4b; }
 class MainWindow(QMainWindow):
     def __init__(self, settings=None):
         super().__init__()
-        self.setWindowTitle("MooPython — Python + Qt + 官方 SDK")
+        self.setWindowTitle("MooPie")
         self.resize(1500,900)
         self.setMinimumSize(1150,680)
         self.settings = settings or QSettings("MooClients", "MooPython")
@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.closed=False
         self.pending_quotes={}
         self.account_page = None
+        self.data_pages = {}
         self.gateway=Gateway(self)
         self.runtime = OpenDRuntime(self)
         self.runtime.status.connect(self.set_message)
@@ -86,11 +87,12 @@ class MainWindow(QMainWindow):
         avatar=QLabel("◉"); avatar.setStyleSheet("font-size:32px;color:#939caa;padding:10px;"); side.addWidget(avatar)
         self.nav_buttons = {}
         for name,icon in [("账户","▣"),("图表","▥"),("期权","⌁"),("观察","◎"),("市场","◉"),("自定义","⊞"),("发现","◈")]:
-            b=QPushButton(f"{icon}  {name}"); b.setObjectName("nav"); b.setCheckable(name in ('账户','图表')); b.setChecked(name=="图表")
+            b=QPushButton(f"{icon}  {name}"); b.setObjectName("nav"); b.setCheckable(name in ('账户','图表','期权','观察','市场')); b.setChecked(name=="图表")
             self.nav_buttons[name] = b
             if name == '账户': b.clicked.connect(self.show_accounts)
             elif name == '图表': b.clicked.connect(self.show_charts)
-            elif name != "图表": b.clicked.connect(lambda:QMessageBox.information(self,"看盘客户端","当前实现行情、自选分组导入及只读账户查询。交易、期权链与社区尚未实现。"))
+            elif name in ('期权','观察','市场'): b.clicked.connect(lambda checked,n=name:self.show_data_page(n))
+            elif name != "图表": b.clicked.connect(lambda:QMessageBox.information(self,"看盘客户端","当前实现行情、自选分组导入及只读账户查询。该页面尚未实现。"))
             side.addWidget(b)
         side.addStretch()
         b=QPushButton("⊕  添加自选"); b.clicked.connect(self.add_symbol); side.addWidget(b)
@@ -101,7 +103,7 @@ class MainWindow(QMainWindow):
         refresh=QPushButton("↻"); refresh.setToolTip("刷新行情 ⌘R"); refresh.clicked.connect(self.refresh); topbox.addWidget(refresh)
         self.search=QLineEdit(); self.search.setPlaceholderText("⌕ 搜索自选股"); self.search.setFixedWidth(210); self.search.textChanged.connect(self.search_changed); topbox.addWidget(self.search)
         topbox.addStretch()
-        title=QLabel("<span style='color:#ff7109'>⌁</span> <b>MooPython</b> <span style='font-size:10px;color:#ff7109'>Qt</span>")
+        title=QLabel("<span style='color:#ff7109'>⌁</span> <b>MooPie</b>")
         title.setStyleSheet("font-size:20px;"); topbox.addWidget(title); topbox.addStretch()
         self.mode_label=QLabel("演示数据"); self.mode_label.setStyleSheet("color:#ff7109;"); topbox.addWidget(self.mode_label)
         self.connect_button=QPushButton("连接 OpenD"); self.connect_button.setObjectName("connect"); self.connect_button.clicked.connect(self.connection_settings); topbox.addWidget(self.connect_button)
@@ -342,11 +344,33 @@ class MainWindow(QMainWindow):
                 self.account_page.cleanup(); self.pages.removeWidget(self.account_page); self.account_page.deleteLater()
             self.account_page = AccountsDialog(self); self.pages.addWidget(self.account_page)
         self.pages.setCurrentWidget(self.account_page)
-        self.nav_buttons['账户'].setChecked(True); self.nav_buttons['图表'].setChecked(False)
+        self.check_nav('账户')
 
     def show_charts(self):
         self.pages.setCurrentIndex(0)
-        self.nav_buttons['账户'].setChecked(False); self.nav_buttons['图表'].setChecked(True)
+        self.check_nav('图表')
+
+    def check_nav(self, name):
+        for label, button in self.nav_buttons.items():
+            if button.isCheckable(): button.setChecked(label == name)
+
+    def show_data_page(self, name):
+        from .pages import OptionsPage, ObservePage, MarketPage
+        page = self.data_pages.get(name)
+        if page is None or page.session != self.token:
+            if page is not None:
+                page.cleanup(); self.pages.removeWidget(page); page.deleteLater()
+            page = {'期权': OptionsPage, '观察': ObservePage, '市场': MarketPage}[name](self)
+            self.data_pages[name] = page; self.pages.addWidget(page)
+        self.pages.setCurrentWidget(page); self.check_nav(name)
+
+    def open_chart_code(self, code, name=''):
+        try: code = symbol(code)
+        except ValueError:
+            self.set_message('此标的暂不支持图表，请在当前页面查看快照'); return
+        if code not in self.state.symbols: self.state.symbols.append(code)
+        if name: self.state.names[code] = name
+        self.persist(); self.update_table(True); self.select_symbol(code); self.show_charts()
 
     def show_watchlist(self):
         if self.mode != 'live':
@@ -404,4 +428,5 @@ class MainWindow(QMainWindow):
         if not self.closing:
             self.closing=True; self.health_timer.stop(); self.flush_timer.stop(); self.setEnabled(False)
             if self.account_page is not None: self.account_page.cleanup(); self.account_page.clear_data()
+            for page in self.data_pages.values(): page.cleanup(); page.clear_data()
             self.gateway.shutdown()

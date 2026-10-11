@@ -104,13 +104,13 @@ class PublicationTests(unittest.TestCase):
         shutil.rmtree(self.root.with_name(self.root.name+'-normalized'))
 
     def test_missing_installer_never_contacts_github(self):
-        (self.root / 'MooPython-macos-arm64.dmg').unlink()
+        (self.root / 'MooPie-macos-arm64.dmg').unlink()
         with self.assertRaisesRegex(RuntimeError, 'Missing or truncated'):
             self.publish()
         self.assertEqual(self.calls, [])
 
     def test_corruption_rejected(self):
-        image = self.root / 'MooPython-macos-arm64.dmg'
+        image = self.root / 'MooPie-macos-arm64.dmg'
         data = bytearray(image.read_bytes()); data[0] = 0
         image.write_bytes(data)
         with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
@@ -118,7 +118,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_invalid_container_rejected(self):
-        image = self.root / 'MooPython-macos-arm64.dmg'
+        image = self.root / 'MooPie-macos-arm64.dmg'
         image.write_bytes(b'x' * 4608)
         with self.assertRaisesRegex(RuntimeError, 'Invalid DMG'):
             self.publish()
@@ -134,10 +134,10 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_signature_and_real_startup_evidence_required(self):
-        self.change('MooPython-macos-arm64.validation.json', official_opend_signature_verified=False)
+        self.change('MooPie-macos-arm64.validation.json', official_opend_signature_verified=False)
         with self.assertRaisesRegex(RuntimeError, 'validation incomplete'):
             self.publish()
-        self.change('MooPython-macos-arm64.validation.json', official_opend_signature_verified=True)
+        self.change('MooPie-macos-arm64.validation.json', official_opend_signature_verified=True)
         self.change('python-opend-smoke.json', official_gui_alive_seconds=0)
         with self.assertRaisesRegex(RuntimeError, 'startup validation missing'):
             self.publish()

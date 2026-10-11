@@ -7,13 +7,13 @@
 | `apps/python` | PySide6 / Qt Widgets | 官方 moomoo Python SDK 10.11.7108 |
 | `apps/swift-cpp` | SwiftUI / Canvas | 官方 C++ SDK 10.11.7108，通过 C ABI 桥接 |
 
-目前包含自选列表、搜索、行情表格、K 线与成交量、均线、周期切换和演示模式。Python 版优先推进功能，新增官方自选分组导入、账户资产与持仓只读查询；Swift/C++ 版保留作对照。未实现完整交易和资讯功能。演示行情是生成数据，不可用于投资决策。两版的演示与性能回放使用同一个合成行情文件 `fixtures/market.json`。
+目前包含自选列表、搜索、行情表格、K 线与成交量、均线、周期切换和演示模式。Python 客户端命名为 MooPie，优先推进功能：官方自选分组导入和全宽观察表、期权到期日与 Call/Put 合约链及报价、市场总览，以及账户现金/资产/盈亏、持仓、订单、成交历史和资金明细只读查询；Swift/C++ 版保留作对照。未实现下单和完整资讯功能。市场数据受公开 API 覆盖和账户权限限制，美股总览使用明确标注的 ETF，未伪装成美股指数；外汇和未覆盖的全球市场不会填入演示值。演示行情是生成数据，不可用于投资决策。两版的演示与性能回放使用同一个合成行情文件 `fixtures/market.json`。
 
 ## 下载 runner 打包结果
 
 打开仓库 **Actions → Package Python macOS client → 成功的运行 → Artifacts**：
 
-- `MooPython-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 和安装包校验结果。
+- `MooPie-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 和安装包校验结果。
 
 日常 CI 只构建 Python 版，不运行性能测试或 Swift/C++ 打包。Swift/C++ 源码保留供以后使用。安装包由 CI 生成，本地只做开发和必要测试。手动触发：`gh workflow run package-python.yml --ref main -f force=true`。
 
@@ -80,7 +80,7 @@ The runners test the updater and actually launch the bundled, publisher-signed G
 
 ```sh
 swift test --package-path runtime
-python3 scripts/smoke-opend.py apps/python/dist/MooPython.app artifacts/python-opend-smoke.json
+python3 scripts/smoke-opend.py apps/python/dist/MooPie.app artifacts/python-opend-smoke.json
 python3 scripts/smoke-opend.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swift-cpp-opend-smoke.json
 ```
 
