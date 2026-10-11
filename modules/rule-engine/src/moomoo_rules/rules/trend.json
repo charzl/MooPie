@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "daily-trend",
+  "version": "1.0.0",
+  "engine_major": 0,
+  "description": "Experimental trend screening; scores are not probabilities.",
+  "rules": [
+    {"id": "above-ma50", "metric": "distance_ma50_pct", "op": ">", "value": 0, "weight": 25, "required": true},
+    {"id": "ma50-rising", "metric": "ma50_slope_5_pct", "op": ">", "value": 0, "weight": 20, "required": true},
+    {"id": "above-ma200", "metric": "distance_ma200_pct", "op": ">", "value": 0, "weight": 15, "required": true},
+    {"id": "ma20-above-ma50", "metric": "ma20_vs_ma50_pct", "op": ">", "value": 0, "weight": 15, "required": false},
+    {"id": "not-overextended", "metric": "distance_ma50_pct", "op": "<=", "value": 8, "weight": 15, "required": true},
+    {"id": "volume-confirmation", "metric": "volume_ratio_20", "op": ">=", "value": 1.2, "weight": 10, "required": false}
+  ]
+}

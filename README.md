@@ -49,6 +49,8 @@ C++ 构建脚本从 SDK 附带的源归档编译 protobuf 3.21.5 和 OpenSSL 3.0
 
 ## 真实行情
 
+独立每日扫描模块见 [modules/rule-engine](modules/rule-engine/README.md)：标准化日线输入、版本化 JSON 规则、MA50 等指标与逐条命中证据，输出可供 Codex 读取的 JSON。模块有独立 wheel 构建和测试流程，当前尚未接入客户端的真实行情采集或 AI 调用。
+
 打包版自动启动内置[官方 OpenD](https://www.moomoo.com/download/OpenAPI)，请在官方窗口登录，启用本机 API（通常 `127.0.0.1:11111`），再在客户端连接设置中填入同一地址和端口。这两个实验客户端仅支持本机未加密 API 连接。账号登录与行情权限由 OpenD 管理，CI 不会登录账号。两版均打包真实官方 OpenD，并共用自动更新器。
 
 已验证构建、数据处理与协议校验；真实 OpenD 端到端联调和统一工作负载下的 CPU / 内存比较仍需进行。runner 自动进行三轮相同负载测试，记录 SDK 已加载时的启动、空闲/更新 CPU 与 RSS、离屏界面更新耗时；它不能代替真实 OpenD 和个人 Mac 上的交互比较。CPU 100% 代表一个核心，离屏截图耗时不是显示 FPS。两版 UI 框架不同，结果比较的是整套方案。

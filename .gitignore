@@ -8,6 +8,7 @@
 **/thirdlib/
 **/__pycache__/
 *.pyc
+**/*.egg-info/
 *.xcuserstate
 **/vendor/**/*.pb.h
 **/vendor/**/*.pb.cc
