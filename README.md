@@ -17,9 +17,9 @@
 
 日常 CI 只构建 Python 版，不运行性能测试或 Swift/C++ 打包。Swift/C++ 源码保留供以后使用。安装包由 CI 生成，本地只做开发和必要测试。手动触发：`gh workflow run package-python.yml --ref main -f force=true`。
 
-外层 artifact ZIP 解压后，打开 DMG，将应用拖入 Applications。也可从仓库 Releases 直接下载 DMG。当前为 Apple Silicon，系统要求 macOS 14 或以上。客户端为 ad-hoc 签名，尚未公证；首次打开可能需要在系统隐私与安全设置中允许运行。内置 OpenD 保留官方签名。
+外层 artifact ZIP 解压后，打开 DMG，将应用拖入 Applications。也可从仓库 Releases 直接下载 DMG。当前为 Apple Silicon，系统要求 macOS 14 或以上。客户端为 ad-hoc 签名，尚未公证；首次打开可能需要在系统隐私与安全设置中允许运行。独立安装的 OpenD 保留官方签名。
 
-创建 PR、向已有 PR 分支推送新提交、重新打开 PR 或将草稿转为待评审都会自动打包 MooPie（草稿 PR 也打包）。同一个 PR 的新提交会取消旧的构建，只保留最新结果。PR 安装包从该运行的 Artifacts 下载，不发布到 Releases。单独推送一个没有 PR 的开发分支不会触发打包。推送 main 或 v 开头的 tag 也会触发构建；也可在 Actions 页面点 **Run workflow**。使用 GitHub 托管 macOS 15 runner，无需在个人 Mac 上安装 runner。产物保留 14 天。构建会下载并打包真实官方 OpenD；预览使用演示数据，无需账号、预先安装 OpenD 或 secret。
+创建 PR、向已有 PR 分支推送新提交、重新打开 PR 或将草稿转为待评审都会自动打包 MooPie（草稿 PR 也打包）。同一个 PR 的新提交会取消旧的构建，只保留最新结果。PR 安装包从该运行的 Artifacts 下载，不发布到 Releases。单独推送一个没有 PR 的开发分支不会触发打包。推送 main 或 v 开头的 tag 也会触发构建；也可在 Actions 页面点 **Run workflow**。使用 GitHub 托管 macOS 15 runner，无需在个人 Mac 上安装 runner。产物保留 14 天。MooPie 安装包不含 OpenD，只有管理器和下载信息；首次使用从官方独立下载安装，以后复用并更新；预览使用演示数据，无需账号、预先安装 OpenD 或 secret。
 
 ## 本地构建
 
@@ -54,7 +54,7 @@ Python 版连接后，点击自选列表旁的 **moomoo 自选**，获取分组�
 
 独立每日扫描模块见 [modules/rule-engine](modules/rule-engine/README.md)：标准化日线输入、版本化 JSON 规则、MA50 等指标与逐条命中证据，输出可供 Codex 读取的 JSON。模块有独立 wheel 构建和测试流程，当前尚未接入客户端的真实行情采集或 AI 调用。
 
-打包版自动启动内置[官方 OpenD](https://www.moomoo.com/download/OpenAPI)，请在官方窗口登录，启用本机 API（通常 `127.0.0.1:11111`），再在客户端连接设置中填入同一地址和端口。这两个实验客户端仅支持本机未加密 API 连接。账号登录与行情权限由 OpenD 管理，CI 不会登录账号。两版均打包真实官方 OpenD，并共用自动更新器。
+MooPie 首次运行独立安装并自动启动[官方 OpenD](https://www.moomoo.com/download/OpenAPI)，请在官方窗口登录，启用本机 API（通常 `127.0.0.1:11111`），再在客户端连接设置中填入同一地址和端口。这两个实验客户端仅支持本机未加密 API 连接。账号登录与行情权限由 OpenD 管理，CI 不会登录账号。MooPie 不再内置 OpenD，复用共享安装和自动更新器；Swift/C++ 旧方案仍内置 OpenD。
 
 已验证构建、数据处理与协议校验；真实 OpenD 端到端联调和统一工作负载下的 CPU / 内存比较仍需进行。runner 自动进行三轮相同负载测试，记录 SDK 已加载时的启动、空闲/更新 CPU 与 RSS、离屏界面更新耗时；它不能代替真实 OpenD 和个人 Mac 上的交互比较。CPU 100% 代表一个核心，离屏截图耗时不是显示 FPS。两版 UI 框架不同，结果比较的是整套方案。
 
@@ -66,15 +66,15 @@ Python 版连接后，点击自选列表旁的 **moomoo 自选**，获取分组�
 
 ## Bundled real OpenD and automatic updates
 
-Both macOS packages now include the **pristine official GUI moomoo OpenD 10.11.7108**, including its frameworks and login UI. It is a universal Intel/Apple Silicon binary. `runtime/opend.json` pins the official archive URL and SHA-256 for reproducible builds; its original Developer ID signature (Team ID `6HE4ZULJ45`, bundle ID `com.moomoo.opend`) is preserved. OpenD is proprietary third-party software and is not covered by this repository's MIT license.
+MooPie downloads the **pristine official GUI moomoo OpenD 10.11.7108** separately when needed. Its installer contains only the small manager and metadata. The legacy Swift/C++ package still bundles OpenD. It is a universal Intel/Apple Silicon binary. `runtime/opend.json` pins the official archive URL and SHA-256 for reproducible builds; its original Developer ID signature (Team ID `6HE4ZULJ45`, bundle ID `com.moomoo.opend`) is preserved. OpenD is proprietary third-party software and is not covered by this repository's MIT license.
 
-On normal app startup, the native `OpenDManager` helper installs a shared runtime into `~/Library/Application Support/MooClients/OpenD`, opens the official login window, and checks for updates in the background. Both clients use this same gateway; an already running official OpenD is reused and never killed. Sign in through **OpenD's own window**, then use **Connect OpenD** in the client. Credentials are handled by official OpenD, not these clients. Closing either client leaves the shared gateway running. Previews, SDK tests and UI benchmarks do not auto-launch OpenD.
+On normal app startup, the native `OpenDManager` helper reuses an existing shared runtime or downloads the pinned official OpenD once into `~/Library/Application Support/MooClients/OpenD`, opens the official login window, and checks for updates in the background. Both clients use this same gateway; an already running official OpenD is reused and never killed. Sign in through **OpenD's own window**, then use **Connect OpenD** in the client. Credentials are handled by official OpenD, not these clients. Closing either client leaves the shared gateway running. Previews, SDK tests and UI benchmarks do not auto-launch OpenD.
 
 Updates are checked on startup (at most once per 24 hours) and every 24 hours while a client stays open. Settings provide **Launch / Login**, **Check updates**, and **Rollback**. The updater uses moomoo's latest-link endpoint and the official Futu endpoint as a version-only fallback; it always downloads the **moomoo** artifact over HTTPS. It checks bundle identity, expected version, CPU architecture, and the official publisher's signature before atomically changing the selected version. The currently running gateway is not restarted. Quit the official OpenD and launch it again to use the newly staged version; the preceding version remains available for rollback. Concurrent updates are prevented with a process lock. Failed downloads, invalid signatures and invalid packages leave the selected version unchanged. A launch-command failure attempts the previous version; failures after launch or account login still require manual rollback.
 
 OpenD updates do **not** rewrite the Python or C++ SDK inside a signed/frozen client. Local builds use pinned SDK versions; CI automatically resolves official SDK updates, tests and rebuilds both clients, and publishes new installers only when all checks pass. Updating OpenD alone cannot guarantee perpetual API compatibility.
 
-The official GUI OpenD currently occupies about **735 MiB**, so it dominates both package sizes. There is also one shared runtime copy on first launch, plus retained versions and official caches; previous small client-only package sizes no longer describe these bundles. UI benchmark CPU/RSS still measures only the client process, without a logged-in OpenD. Live end-to-end resource comparisons need a logged-in gateway on the same Mac.
+The official GUI OpenD occupies about **735 MiB** and is installed separately for MooPie. Client updates do not download OpenD again when a compatible shared version is already installed. First use without an existing runtime requires internet; SDK, Python and Qt still contribute to the client bundle size. Swift/C++ legacy bundles still include OpenD. UI benchmark CPU/RSS still measures only the client process, without a logged-in OpenD. Live end-to-end resource comparisons need a logged-in gateway on the same Mac.
 
 The runners test the updater and actually launch the bundled, publisher-signed GUI OpenD for a five-second smoke test without account credentials. This verifies packaging and startup, **not** live quotes or account permissions.
 
@@ -90,8 +90,8 @@ python3 scripts/smoke-opend.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swi
 
 Upgrades happen in ephemeral CI checkouts, without automatically changing the main branch. Local source defaults stay pinned in `runtime/sdk.json` and `runtime/opend.json`. Each release includes `resolved-build.json` with the actual source commit, SDK/OpenD versions, official URLs and SHA-256 hashes, plus `SHA256SUMS.txt` for the Python installer.
 
-Publication requires Python unit and integration tests, real OpenD update/startup acceptance, mounted-DMG identity/signature checks. Downloads, hashes, incompatible versions, compilation or tests failing prevent publication; the previous Release is never overwritten. Breaking API changes may still require changes to our adapter code; CI does not automatically repair application code.
+Publication requires Python unit and integration tests, real OpenD update/startup acceptance, mounted-DMG identity/signature checks and confirmation that the installer contains no OpenD executable. Downloads, hashes, incompatible versions, compilation or tests failing prevent publication; the previous Release is never overwritten. Breaking API changes may still require changes to our adapter code; CI does not automatically repair application code.
 
 Already published source/version combinations skip the expensive builds. Manual dispatch offers `force` to create another build. The Python installer and validation evidence are uploaded to a draft first; the draft becomes public only when every asset's name and size is verified. Releases persist; Actions artifacts expire after 14 days. GitHub scheduled workflows can run late and must remain enabled on the default branch.
 
-Installed OpenD's own automatic updates and CI's SDK-driven client rebuilds are separate. Download the new client DMG from Releases to replace an installed client.
+MooPie downloads and verifies OpenD separately on first use, reuses it afterwards and checks for independent updates. CI validates this path without embedding OpenD in the DMG. Installed OpenD's updates and CI's SDK-driven client rebuilds are separate. Download the new client DMG from Releases to replace an installed client.

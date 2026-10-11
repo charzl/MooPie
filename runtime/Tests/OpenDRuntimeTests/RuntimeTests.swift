@@ -56,4 +56,14 @@ final class RuntimeTests: XCTestCase {
             XCTAssertNoThrow(try Manager(root: store.root))
         }
     }
+    func testFirstInstallRejectsInvalidChecksumBeforeDownloading() throws {
+        try withStore { store in
+            let manager = try Manager(root: store.root)
+            for checksum in ["", String(repeating: "z", count: 64), String(repeating: "a", count: 63)] {
+                XCTAssertThrowsError(try manager.ensureInstalled(version: "10.11.7108", sha256: checksum))
+            }
+            XCTAssertNil(try store.read())
+        }
+    }
+
 }

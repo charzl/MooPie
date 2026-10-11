@@ -1,4 +1,4 @@
-"""Verify bundled genuine OpenD and updater, then start the official GUI without credentials.
+"""Verify genuine OpenD and updater, then start the official GUI without credentials.
 No quote login or market entitlement is asserted. Only the process started here is stopped.
 """
 import argparse,json,os,pathlib,plistlib,shutil,signal,subprocess,tempfile,time
@@ -7,10 +7,16 @@ def main():
     parser=argparse.ArgumentParser(); parser.add_argument('app'); parser.add_argument('output'); args=parser.parse_args()
     app=pathlib.Path(args.app).resolve(); directory=app/'Contents/Resources/OpenD'
     metadata=json.loads((directory/'opend.json').read_text()); gateway=directory/'moomoo_OpenD.app'; helper=directory/'OpenDManager'
-    command=[str(helper),'--bundle',str(gateway),'--version',metadata['version']]
+    external=app.stem == 'MooPie'
+    if external and list(app.rglob('moomoo_OpenD.app')): raise RuntimeError('MooPie must not bundle OpenD')
+    command=[str(helper),'--metadata',str(directory/'opend.json')] if external else [str(helper),'--bundle',str(gateway),'--version',metadata['version']]
     with tempfile.TemporaryDirectory(prefix='mooclients-opend-smoke-') as work:
         root=pathlib.Path(work)/'runtime'
-        subprocess.run([*command,'--root',str(root),'--verify'],check=True,timeout=60)
+        if external:
+            subprocess.run([*command,'--root',str(root)],check=True,timeout=900)
+            gateway=root/'versions'/metadata['version']/'moomoo_OpenD.app'
+        else:
+            subprocess.run([*command,'--root',str(root),'--verify'],check=True,timeout=60)
         subprocess.run([*command,'--root',str(root),'--offline'],check=True,timeout=90)
         state=json.loads((root/'selection.json').read_text()); assert state['current']==metadata['version']
         installed=root/'versions'/metadata['version']/'moomoo_OpenD.app'
@@ -26,7 +32,7 @@ def main():
                 assert process.poll() is None, f'Genuine GUI OpenD exited early: {process.returncode}'
                 # Versioning/rollback tests use fixtures; this is the real publisher-signed runtime.
                 result=dict(version=metadata['version'],archive_sha256=metadata['sha256'],official_signature_verified=True,
-                    updater_bootstrap_verified=True,incorrect_version_rejected=True,official_gui_alive_seconds=5,
+                    opend_bundled=not external,updater_bootstrap_verified=True,external_bootstrap_verified=external,incorrect_version_rejected=True,official_gui_alive_seconds=5,
                     account_logged_in=False,quote_connection_tested=False,
                     note='Real official OpenD startup only. Login, quotes, CPU/RSS under live data and entitlement acceptance require a user account.')
             finally:

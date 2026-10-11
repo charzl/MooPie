@@ -32,13 +32,14 @@ def preflight(root,source_commit,min_bytes=10*1024*1024):
   with image.open('rb') as stream:stream.seek(-512,2);require(stream.read(4)==b'koly','Invalid DMG container: '+client)
   validation=json.loads(report.read_text());build=json.loads((root/f'{prefix}-build.json').read_text())
   require(validation['file']==image.name and validation['size_bytes']==image.stat().st_size and validation['sha256']==digest(image),'Installer checksum mismatch: '+client)
-  for flag in ('mounted_verified','applications_link_verified','client_signature_verified','official_opend_signature_verified'):require(validation.get(flag) is True,'Installer validation incomplete: '+flag)
+  for flag in ('mounted_verified','applications_link_verified','client_signature_verified','opend_updater_signature_verified'):require(validation.get(flag) is True,'Installer validation incomplete: '+flag)
   require(validation['source_commit']==source_commit and build['commit']==source_commit,'Client source identity mismatch')
   require(build['app']==client+'.app' and build['architecture']=='arm64','Incorrect client or architecture')
   for component in ('sdk','opend'):
    require(validation[f'{component}_version']==manifest[component]['version'] and build[f'{component}_version']==manifest[component]['version'],'Client SDK/OpenD identity mismatch')
+  require(validation.get('opend_bundled') is False and build.get('opend_bundled') is False and build.get('opend_disk_kib')==0,'Lightweight installer must not bundle OpenD')
   smoke=json.loads((root/f'{prefix}-opend-smoke.json').read_text())
-  require(smoke['version']==manifest['opend']['version'] and smoke.get('official_signature_verified') is True and smoke.get('updater_bootstrap_verified') is True and smoke.get('official_gui_alive_seconds',0)>=5,'Real OpenD startup validation missing')
+  require(smoke['version']==manifest['opend']['version'] and smoke.get('official_signature_verified') is True and smoke.get('updater_bootstrap_verified') is True and smoke.get('external_bootstrap_verified') is True and smoke.get('opend_bundled') is False and smoke.get('official_gui_alive_seconds',0)>=5,'Real OpenD startup validation missing')
   files.append(image)
  return manifest,files
 
@@ -53,11 +54,11 @@ def publish(root,source_commit,call=gh,min_bytes=10*1024*1024):
  notes=root/'release-notes.md';notes.write_text(f'''Python macOS 安装包：打开 DMG，把应用拖入 Applications。
 
 - SDK：{manifest['sdk']['version']}
-- 内置官方 OpenD：{manifest['opend']['version']}
+- 独立安装的官方 OpenD（最低兼容版本）：{manifest['opend']['version']}
 - 源码提交：{manifest['source_commit']}
 - 支持 Apple Silicon、macOS 14 及以上。
 
-已通过 Python SDK/界面测试、真实 OpenD 更新与启动校验、DMG 挂载和签名检查。账号登录与真实行情权限仍需用户验收；当前为实验性看盘客户端，未实现完整交易功能。客户端使用 ad-hoc 签名，尚未公证，首次打开可能需要在系统“隐私与安全性”中允许运行；内置 OpenD 保留官方签名。
+已通过 Python SDK/界面测试、真实 OpenD 更新与启动校验、DMG 挂载和签名检查。账号登录与真实行情权限仍需用户验收；当前为实验性看盘客户端，未实现完整交易功能。客户端使用 ad-hoc 签名，尚未公证，首次打开可能需要在系统“隐私与安全性”中允许运行；OpenD 不在安装包中；首次使用联网下载安装，以后复用并独立更新，保留官方签名。
 
 SHA256SUMS.txt 可校验下载文件；resolved-build.json 记录官方源和哈希。
 ''')

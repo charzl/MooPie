@@ -32,11 +32,11 @@ class PublicationTests(unittest.TestCase):
                             sha256=release.digest(image), source_commit=self.commit,
                             sdk_version='10.11.7108', opend_version='10.11.7108',
                             mounted_verified=True, applications_link_verified=True,
-                            client_signature_verified=True, official_opend_signature_verified=True))
+                            client_signature_verified=True, opend_updater_signature_verified=True, opend_bundled=False))
             self.write(prefix + '-build.json', dict(app=client + '.app', architecture='arm64',
-                       commit=self.commit, sdk_version='10.11.7108', opend_version='10.11.7108'))
+                       commit=self.commit, sdk_version='10.11.7108', opend_version='10.11.7108',opend_bundled=False,opend_disk_kib=0))
             self.write(prefix + '-opend-smoke.json', dict(version='10.11.7108',
-                       official_signature_verified=True, updater_bootstrap_verified=True,
+                       official_signature_verified=True, updater_bootstrap_verified=True, external_bootstrap_verified=True,opend_bundled=False,
                        official_gui_alive_seconds=5))
         self.calls = []
         self.assets = []
@@ -134,13 +134,23 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_signature_and_real_startup_evidence_required(self):
-        self.change('MooPie-macos-arm64.validation.json', official_opend_signature_verified=False)
+        self.change('MooPie-macos-arm64.validation.json', opend_updater_signature_verified=False)
         with self.assertRaisesRegex(RuntimeError, 'validation incomplete'):
             self.publish()
-        self.change('MooPie-macos-arm64.validation.json', official_opend_signature_verified=True)
+        self.change('MooPie-macos-arm64.validation.json', opend_updater_signature_verified=True)
         self.change('python-opend-smoke.json', official_gui_alive_seconds=0)
         with self.assertRaisesRegex(RuntimeError, 'startup validation missing'):
             self.publish()
+
+    def test_bundled_opend_cannot_be_published_as_lightweight(self):
+        self.change('python-build.json',opend_bundled=True,opend_disk_kib=735000)
+        with self.assertRaisesRegex(RuntimeError,'must not bundle OpenD'): self.publish()
+        self.assertEqual(self.calls,[])
+
+    def test_external_bootstrap_evidence_is_required(self):
+        self.change('python-opend-smoke.json',external_bootstrap_verified=False)
+        with self.assertRaisesRegex(RuntimeError,'startup validation missing'): self.publish()
+        self.assertEqual(self.calls,[])
 
     def test_upload_failure_leaves_draft(self):
         def fail(*args):

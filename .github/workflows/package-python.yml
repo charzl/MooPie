@@ -34,6 +34,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests/unit -p test_upstream_resolution.py -v
           python3 -m unittest discover -s tests/unit -p test_release_publication.py -v
+          python3 -m unittest discover -s tests/unit -p test_lightweight_packaging.py -v
       - name: Resolve Python SDK and OpenD versions
         id: resolve
         env:
@@ -86,13 +87,9 @@ jobs:
         run: python3 -m unittest discover -s tests/integration -v
       - name: OpenD updater tests
         run: swift test --package-path runtime
-      - name: Real official OpenD download and update acceptance
-        env:
-          MOOMOO_OPEND_UPDATE_ACCEPTANCE: '1'
-        run: swift test --package-path runtime --filter UpdateAcceptanceTests
       - name: Package application
         run: apps/python/scripts/build-app.sh
-      - name: Smoke test packaged app
+      - name: Validate lightweight app and independent OpenD installation
         run: |
           mkdir -p artifacts
           python3 scripts/smoke-app.py apps/python/dist/MooPie.app artifacts/MooPie-preview.png

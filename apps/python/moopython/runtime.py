@@ -10,7 +10,7 @@ class OpenDRuntime(QObject):
     def available(self): return (self.directory/'OpenDManager').is_file()
     def run(self,action='launch'):
         if not self.available:
-            self.status.emit('当前是源码运行；请打包后使用内置 OpenD，或连接已安装的官方 OpenD'); return
+            self.status.emit('当前是源码运行；请连接已安装的官方 OpenD'); return
         if self.process is not None:
             self.status.emit('OpenD 正在启动或检查更新，请稍候'); return
         try: version=json.loads((self.directory/'opend.json').read_text())['version']
@@ -23,4 +23,4 @@ class OpenDRuntime(QObject):
         process.errorOccurred.connect(lambda error:(self.status.emit(f'OpenD 更新器无法启动：{process.errorString()}'),finished()) if error==QProcess.ProcessError.FailedToStart else None)
         flags={'launch':['--launch'],'update':['--force'],'rollback':['--rollback'],'check':[]}[action]
         self.status.emit('正在启动官方 OpenD…' if action=='launch' else '正在检查 OpenD 更新…' if action=='update' else '正在回退 OpenD…')
-        process.start(str(self.directory/'OpenDManager'),['--bundle',str(self.directory/'moomoo_OpenD.app'),'--version',version,*flags])
+        process.start(str(self.directory/'OpenDManager'),['--metadata',str(self.directory/'opend.json'),*flags])
