@@ -19,7 +19,7 @@
 
 外层 artifact ZIP 解压后，打开 DMG，将应用拖入 Applications。也可从仓库 Releases 直接下载 DMG。当前为 Apple Silicon，系统要求 macOS 14 或以上。客户端为 ad-hoc 签名，尚未公证；首次打开可能需要在系统隐私与安全设置中允许运行。内置 OpenD 保留官方签名。
 
-每次推送 main、创建 PR、推送 v 开头的 tag 都会触发构建；也可在 Actions 页面点 **Run workflow**。使用 GitHub 托管 macOS 15 runner，无需在个人 Mac 上安装 runner。产物保留 14 天。构建会下载并打包真实官方 OpenD；预览使用演示数据，无需账号、预先安装 OpenD 或 secret。
+创建 PR、向已有 PR 分支推送新提交、重新打开 PR 或将草稿转为待评审都会自动打包 MooPie（草稿 PR 也打包）。同一个 PR 的新提交会取消旧的构建，只保留最新结果。PR 安装包从该运行的 Artifacts 下载，不发布到 Releases。单独推送一个没有 PR 的开发分支不会触发打包。推送 main 或 v 开头的 tag 也会触发构建；也可在 Actions 页面点 **Run workflow**。使用 GitHub 托管 macOS 15 runner，无需在个人 Mac 上安装 runner。产物保留 14 天。构建会下载并打包真实官方 OpenD；预览使用演示数据，无需账号、预先安装 OpenD 或 secret。
 
 ## 本地构建
 
