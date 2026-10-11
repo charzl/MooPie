@@ -38,8 +38,6 @@ class PublicationTests(unittest.TestCase):
             self.write(prefix + '-opend-smoke.json', dict(version='10.11.7108',
                        official_signature_verified=True, updater_bootstrap_verified=True,
                        official_gui_alive_seconds=5))
-        self.write('comparison.json', {})
-        (self.root / 'comparison.md').write_text('Measured performance')
         self.calls = []
         self.assets = []
         self.env = patch.dict(os.environ, GITHUB_REPOSITORY='charzl/moomoo-clients')
@@ -67,10 +65,10 @@ class PublicationTests(unittest.TestCase):
     def publish(self, call=None):
         return release.publish(self.root, self.commit, call or self.gh, min_bytes=1024)
 
-    def test_valid_pair_preflight(self):
+    def test_python_preflight_without_performance_reports(self):
         manifest, files = release.preflight(self.root, self.commit, min_bytes=1024)
         self.assertEqual(manifest, self.manifest)
-        self.assertEqual(len(files), 2)
+        self.assertEqual(len(files), 1)
 
     def test_actions_preserved_directory_layout_is_normalized(self):
         nested = self.root/'apps/python/dist'
@@ -81,7 +79,7 @@ class PublicationTests(unittest.TestCase):
         try:
             manifest, images = release.preflight(target, self.commit, min_bytes=1024)
             self.assertEqual(manifest, self.manifest)
-            self.assertEqual(len(images), 2)
+            self.assertEqual(len(images), 1)
             self.assertTrue((nested/'resolved-build.json').exists())
         finally:
             import shutil
@@ -106,7 +104,7 @@ class PublicationTests(unittest.TestCase):
         shutil.rmtree(self.root.with_name(self.root.name+'-normalized'))
 
     def test_missing_installer_never_contacts_github(self):
-        (self.root / 'MooSwiftCpp-macos-arm64.dmg').unlink()
+        (self.root / 'MooPython-macos-arm64.dmg').unlink()
         with self.assertRaisesRegex(RuntimeError, 'Missing or truncated'):
             self.publish()
         self.assertEqual(self.calls, [])
@@ -185,8 +183,8 @@ class PublicationTests(unittest.TestCase):
         edit = operations.index(('release', 'edit'))
         self.assertEqual(self.calls[edit - 1][:2], ('release', 'view'))
         self.assertIn('--draft=false', self.calls[edit])
-        self.assertEqual(sum(a['name'].endswith('.dmg') for a in self.assets), 2)
-        self.assertEqual(sum(a['name'].endswith('.validation.json') for a in self.assets), 2)
+        self.assertEqual(sum(a['name'].endswith('.dmg') for a in self.assets), 1)
+        self.assertEqual(sum(a['name'].endswith('.validation.json') for a in self.assets), 1)
 
 
 if __name__ == '__main__':

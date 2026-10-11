@@ -1,9 +1,9 @@
-"""Preflight both validated installers, then publish atomically through a draft."""
+"""Preflight validated Python installer, then publish atomically through a draft."""
 import hashlib,json,os,pathlib,re,shutil,subprocess,sys
-CLIENTS=('MooPython','MooSwiftCpp')
+CLIENTS=('MooPython',)
 def collect_artifacts(root):
  root=pathlib.Path(root);target=root.with_name(root.name+'-normalized');target.mkdir(parents=True,exist_ok=True)
- names=['resolved-build.json','comparison.md','comparison.json']
+ names=['resolved-build.json']
  for client,prefix in zip(CLIENTS,('python','swift-cpp')):names.extend([f'{client}-macos-arm64.dmg',f'{client}-macos-arm64.validation.json',f'{prefix}-build.json',f'{prefix}-opend-smoke.json'])
  for name in names:
   matches=[path for path in root.rglob(name) if path.is_file()]
@@ -40,7 +40,6 @@ def preflight(root,source_commit,min_bytes=10*1024*1024):
   smoke=json.loads((root/f'{prefix}-opend-smoke.json').read_text())
   require(smoke['version']==manifest['opend']['version'] and smoke.get('official_signature_verified') is True and smoke.get('updater_bootstrap_verified') is True and smoke.get('official_gui_alive_seconds',0)>=5,'Real OpenD startup validation missing')
   files.append(image)
- require((root/'comparison.md').is_file() and (root/'comparison.json').is_file(),'Performance report missing')
  return manifest,files
 
 def gh(*args):
@@ -51,16 +50,16 @@ def publish(root,source_commit,call=gh,min_bytes=10*1024*1024):
  root=pathlib.Path(root);manifest,files=preflight(root,source_commit,min_bytes)
  tag=manifest['release_tag'];checksums=root/'SHA256SUMS.txt'
  checksums.write_text(''.join(f'{digest(file)}  {file.name}\n' for file in files))
- notes=root/'release-notes.md';notes.write_text(f'''两版 macOS 安装包：打开 DMG，把应用拖入 Applications。
+ notes=root/'release-notes.md';notes.write_text(f'''Python macOS 安装包：打开 DMG，把应用拖入 Applications。
 
 - SDK：{manifest['sdk']['version']}
 - 内置官方 OpenD：{manifest['opend']['version']}
 - 源码提交：{manifest['source_commit']}
 - 支持 Apple Silicon、macOS 14 及以上。
 
-已通过两版 SDK/界面测试、真实 OpenD 更新与启动校验、DMG 挂载和签名检查。账号登录与真实行情权限仍需用户验收；当前为实验性看盘客户端，未实现完整交易功能。客户端使用 ad-hoc 签名，尚未公证，首次打开可能需要在系统“隐私与安全性”中允许运行；内置 OpenD 保留官方签名。
+已通过 Python SDK/界面测试、真实 OpenD 更新与启动校验、DMG 挂载和签名检查。账号登录与真实行情权限仍需用户验收；当前为实验性看盘客户端，未实现完整交易功能。客户端使用 ad-hoc 签名，尚未公证，首次打开可能需要在系统“隐私与安全性”中允许运行；内置 OpenD 保留官方签名。
 
-SHA256SUMS.txt 可校验下载文件；resolved-build.json 记录官方源和哈希。comparison.md 是离线客户端性能报告，CPU/RSS 不包含登录后的 OpenD。
+SHA256SUMS.txt 可校验下载文件；resolved-build.json 记录官方源和哈希。
 ''')
  try:existing=json.loads(call('api',f"repos/{os.environ['GITHUB_REPOSITORY']}/releases/tags/{tag}"))
  except subprocess.CalledProcessError as error:
@@ -68,7 +67,7 @@ SHA256SUMS.txt 可校验下载文件；resolved-build.json 记录官方源和哈
   existing=None
  if existing is not None:require(existing.get('draft') is True,'Release already published; refusing overwrite')
  else:call('release','create',tag,'--draft','--prerelease','--target',source_commit,'--title',f"macOS · SDK {manifest['sdk']['version']} · OpenD {manifest['opend']['version']}",'--notes-file',str(notes))
- assets=[*files,checksums,root/'resolved-build.json',root/'comparison.md',root/'comparison.json']
+ assets=[*files,checksums,root/'resolved-build.json']
  for client,prefix in zip(CLIENTS,('python','swift-cpp')):assets.extend([root/f'{client}-macos-arm64.validation.json',root/f'{prefix}-build.json',root/f'{prefix}-opend-smoke.json'])
  call('release','upload',tag,*map(str,assets),'--clobber')
  found=json.loads(call('release','view',tag,'--json','assets'))['assets'];expected={p.name:p.stat().st_size for p in assets};actual={a['name']:a['size'] for a in found}

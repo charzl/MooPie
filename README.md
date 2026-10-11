@@ -11,12 +11,11 @@
 
 ## 下载 runner 打包结果
 
-打开仓库 **Actions → Package macOS clients → 成功的运行 → Artifacts**：
+打开仓库 **Actions → Package Python macOS client → 成功的运行 → Artifacts**：
 
-- `MooPython-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 与逐轮性能记录。
-- `MooSwiftCpp-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 与逐轮性能记录。
+- `MooPython-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 和安装包校验结果。
 
-还有 `macOS-performance-comparison`，包含对比表和原始结果，可直接在 Compare benchmark results 的 Summary 中查看。
+日常 CI 只构建 Python 版，不运行性能测试或 Swift/C++ 打包。Swift/C++ 源码保留供以后使用。安装包由 CI 生成，本地只做开发和必要测试。手动触发：`gh workflow run package-python.yml --ref main -f force=true`。
 
 外层 artifact ZIP 解压后，打开 DMG，将应用拖入 Applications。也可从仓库 Releases 直接下载 DMG。当前为 Apple Silicon，系统要求 macOS 14 或以上。客户端为 ad-hoc 签名，尚未公证；首次打开可能需要在系统隐私与安全设置中允许运行。内置 OpenD 保留官方签名。
 
@@ -87,12 +86,12 @@ python3 scripts/smoke-opend.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swi
 
 ## Automatic CI upgrades and DMG releases
 
-[Releases](https://github.com/charzl/moomoo-clients/releases) contains both drag-to-Applications DMG installers as experimental prereleases. The workflow checks official SDK/OpenD versions daily, on main pushes and on manual dispatch. A matching SDK/OpenD pair is resolved once for both clients. The official Python source distribution is hash-pinned and the matching C++ source archive is downloaded and verified; SDK directories, bundled dependency archives and dylib identities are read from build metadata instead of a fixed version path.
+[Releases](https://github.com/charzl/moomoo-clients/releases) contains drag-to-Applications Python DMG installers as experimental prereleases. The workflow checks official SDK/OpenD versions daily, on main pushes and on manual dispatch. A compatible Python SDK/OpenD pair is resolved for the Python client. The official Python source distribution is hash-pinned; SDK directories, bundled dependency archives and dylib identities are read from build metadata instead of a fixed version path.
 
-Upgrades happen in ephemeral CI checkouts, without automatically changing the main branch. Local source defaults stay pinned in `runtime/sdk.json` and `runtime/opend.json`. Each release includes `resolved-build.json` with the actual source commit, SDK/OpenD versions, official URLs and SHA-256 hashes, plus `SHA256SUMS.txt` for both installers.
+Upgrades happen in ephemeral CI checkouts, without automatically changing the main branch. Local source defaults stay pinned in `runtime/sdk.json` and `runtime/opend.json`. Each release includes `resolved-build.json` with the actual source commit, SDK/OpenD versions, official URLs and SHA-256 hashes, plus `SHA256SUMS.txt` for the Python installer.
 
-Publication requires both client test suites, real OpenD update/startup acceptance, mounted-DMG identity/signature checks and benchmark report validation. Downloads, hashes, incompatible versions, compilation or tests failing prevent publication; the previous Release is never overwritten. Breaking API changes may still require changes to our adapter code; CI does not automatically repair application code.
+Publication requires Python unit and integration tests, real OpenD update/startup acceptance, mounted-DMG identity/signature checks. Downloads, hashes, incompatible versions, compilation or tests failing prevent publication; the previous Release is never overwritten. Breaking API changes may still require changes to our adapter code; CI does not automatically repair application code.
 
-Already published source/version combinations skip the expensive builds. Manual dispatch offers `force` to create another build. Both installers are uploaded to a draft first; the draft becomes public only when every asset's name and size is verified. Releases persist; Actions artifacts expire after 14 days. GitHub scheduled workflows can run late and must remain enabled on the default branch.
+Already published source/version combinations skip the expensive builds. Manual dispatch offers `force` to create another build. The Python installer and validation evidence are uploaded to a draft first; the draft becomes public only when every asset's name and size is verified. Releases persist; Actions artifacts expire after 14 days. GitHub scheduled workflows can run late and must remain enabled on the default branch.
 
 Installed OpenD's own automatic updates and CI's SDK-driven client rebuilds are separate. Download the new client DMG from Releases to replace an installed client.
