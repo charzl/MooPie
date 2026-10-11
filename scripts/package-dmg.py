@@ -1,5 +1,5 @@
 """Create and mount-verify a drag-to-Applications installer using macOS system tools."""
-import argparse,json,os,pathlib,plistlib,subprocess,tempfile
+import argparse,hashlib,json,os,pathlib,plistlib,subprocess,tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 REQ='=identifier "com.moomoo.opend" and anchor apple generic and certificate leaf[subject.OU] = "6HE4ZULJ45"'
 def run(*args):return subprocess.check_output(args,text=True)
@@ -26,6 +26,11 @@ def package(app,output):
             info=plistlib.loads((installed/'Contents/Info.plist').read_bytes())
             if info['MooSDKVersion']!=metadata['sdk']['version'] or info['MooOpenDVersion']!=metadata['opend']['version']:raise RuntimeError('Installer version mismatch')
         finally:run('hdiutil','detach',str(mount))
+    checksum=hashlib.sha256()
+    with output.open('rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''):checksum.update(block)
+    report=dict(schema=1,file=output.name,size_bytes=output.stat().st_size,sha256=checksum.hexdigest(),source_commit=metadata['source_commit'],sdk_version=metadata['sdk']['version'],opend_version=metadata['opend']['version'],mounted_verified=True,applications_link_verified=True,client_signature_verified=True,official_opend_signature_verified=True)
+    output.with_suffix('.validation.json').write_text(json.dumps(report,indent=2)+'\n')
     print(f'Verified drag-to-Applications installer: {output.name} ({output.stat().st_size//1024//1024} MiB)')
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('app');p.add_argument('output');a=p.parse_args();package(a.app,a.output)

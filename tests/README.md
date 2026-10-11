@@ -37,3 +37,9 @@ Current limits: no production OpenD authentication/permissions acceptance test, 
 ## CI resolution and installers
 
 `tests/unit/test_upstream_resolution.py` covers matched upgrades, unchanged hashes, pinned pull-request builds, downgrade and incompatible-version rejection, untrusted URLs/version injection, yanked distributions and malformed hashes. Both packaged executables expose `--sdk-check`, validating the actual SDK against embedded build metadata. `scripts/package-dmg.py` creates, checksum-verifies and mounts each DMG, checks the Applications shortcut, both bundle signatures and embedded SDK/OpenD identity. Release publication depends on both packaging jobs and report validation; a draft becomes public only after both installers and provenance/checksums are uploaded.
+
+`tests/unit/test_release_publication.py` tests release preflight and draft publication independently of GitHub: missing/corrupt/invalid containers, mismatched source/version/architecture, absent signature and real-startup evidence, failed uploads, missing or incorrect-size uploaded assets, refusal to overwrite public releases, and the successful publication sequence. Both Linux CI validation jobs discover this suite. Each mounted DMG produces a `.validation.json` report bound to its SHA-256 and size; publication rechecks those bytes and identities before contacting GitHub. These mocked unit tests verify gating logic; real mount/signature/startup checks run separately on both Mac jobs.
+
+```sh
+python3 -m unittest discover -s tests/unit -v
+```

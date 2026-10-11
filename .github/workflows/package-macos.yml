@@ -102,6 +102,7 @@ jobs:
           name: MooPython-macos-arm64
           path: |
             apps/python/dist/*.dmg
+            apps/python/dist/*.validation.json
             artifacts/*-build.json
             artifacts/*-benchmark*.json
             artifacts/*-benchmark*.log
@@ -171,6 +172,7 @@ jobs:
           name: MooSwiftCpp-macos-arm64
           path: |
             apps/swift-cpp/dist/*.dmg
+            apps/swift-cpp/dist/*.validation.json
             artifacts/*-build.json
             artifacts/*-benchmark*.json
             artifacts/*-benchmark*.log
