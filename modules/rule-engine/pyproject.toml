@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "moomoo-rule-engine"
 version = "0.1.0"
 description = "Deterministic, versioned daily market screening for MooClients"
-requires-python = ">=3.10"
+requires-python = ">=3.15,<3.16"
 license = "MIT"
 license-files = ["LICENSE"]
 dependencies = []

@@ -2,6 +2,8 @@
 
 Python 包 `moomoo-rule-engine`，不依赖 Qt、Swift、OpenD SDK 或 AI SDK。输入标准化日线，输出可以让两个桌面客户端或 Codex 读取的 JSON。第一版只有确定性扫描；尚未接入真实 OpenD 数据、自动每日任务、新闻、模型调用或下单。
 
+仅支持当前最新稳定系列 Python 3.15，安装要求为 `>=3.15,<3.16`，不支持 Python 3.10 或其他旧版本。后续新稳定系列发布时再更新安装要求与 CI。
+
 ## 运行
 
 ```sh
@@ -47,4 +49,4 @@ python3 -m pip install build
 python3 -m build modules/rule-engine
 ```
 
-`.github/workflows/rule-engine.yml` 单独测试 Python 3.10/3.14，构建 wheel/sdist，在干净虚拟环境安装 wheel 后重新跑测试和示例扫描，输出独立下载 artifact。它不向 PyPI 发布，不需要安装 OpenD 或提供账号。该模块尚未打进两版 Mac 应用，可作为独立进程通过 JSON 文件调用，后续接入统一的数据采集服务。
+`.github/workflows/rule-engine.yml` 仅使用 Python 3.15（获取该系列的最新稳定补丁版本），构建 wheel/sdist，在干净虚拟环境安装 wheel 后重新跑测试和示例扫描，输出独立下载 artifact。它不向 PyPI 发布，不需要安装 OpenD 或提供账号。该模块尚未打进两版 Mac 应用，可作为独立进程通过 JSON 文件调用，后续接入统一的数据采集服务。
