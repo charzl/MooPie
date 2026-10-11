@@ -1,6 +1,15 @@
 """Preflight both validated installers, then publish atomically through a draft."""
-import hashlib,json,os,pathlib,re,subprocess,sys
+import hashlib,json,os,pathlib,re,shutil,subprocess,sys
 CLIENTS=('MooPython','MooSwiftCpp')
+def collect_artifacts(root):
+ root=pathlib.Path(root);target=root.with_name(root.name+'-normalized');target.mkdir(parents=True,exist_ok=True)
+ names=['resolved-build.json','comparison.md','comparison.json']
+ for client,prefix in zip(CLIENTS,('python','swift-cpp')):names.extend([f'{client}-macos-arm64.dmg',f'{client}-macos-arm64.validation.json',f'{prefix}-build.json',f'{prefix}-opend-smoke.json'])
+ for name in names:
+  matches=[path for path in root.rglob(name) if path.is_file()]
+  require(len(matches)==1,'Missing or ambiguous release asset: '+name)
+  shutil.copyfile(matches[0],target/name)
+ return target
 def require(condition,message):
  if not condition:raise RuntimeError(message)
 def digest(path):
@@ -65,4 +74,4 @@ SHA256SUMS.txt 可校验下载文件；resolved-build.json 记录官方源和哈
  require(all(actual.get(name)==size for name,size in expected.items()),'Release asset verification failed')
  call('release','edit',tag,'--draft=false','--prerelease','--notes-file',str(notes))
  return call('release','view',tag,'--json','url','--jq','.url').strip()
-if __name__=='__main__':print(publish(pathlib.Path(sys.argv[1]).resolve(),os.environ['GITHUB_SHA']))
+if __name__=='__main__':print(publish(collect_artifacts(pathlib.Path(sys.argv[1]).resolve()),os.environ['GITHUB_SHA']))

@@ -72,6 +72,29 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(manifest, self.manifest)
         self.assertEqual(len(files), 2)
 
+    def test_actions_preserved_directory_layout_is_normalized(self):
+        nested = self.root/'apps/python/dist'
+        nested.mkdir(parents=True)
+        for path in list(self.root.iterdir()):
+            if path.is_file(): path.rename(nested/path.name)
+        target = release.collect_artifacts(self.root)
+        try:
+            manifest, images = release.preflight(target, self.commit, min_bytes=1024)
+            self.assertEqual(manifest, self.manifest)
+            self.assertEqual(len(images), 2)
+            self.assertTrue((nested/'resolved-build.json').exists())
+        finally:
+            import shutil
+            shutil.rmtree(target)
+
+    def test_ambiguous_artifacts_rejected(self):
+        nested = self.root/'duplicate'; nested.mkdir()
+        (nested/'resolved-build.json').write_text(json.dumps(self.manifest))
+        with self.assertRaisesRegex(RuntimeError, 'ambiguous'):
+            release.collect_artifacts(self.root)
+        import shutil
+        shutil.rmtree(self.root.with_name(self.root.name+'-normalized'))
+
     def test_missing_installer_never_contacts_github(self):
         (self.root / 'MooSwiftCpp-macos-arm64.dmg').unlink()
         with self.assertRaisesRegex(RuntimeError, 'Missing or truncated'):
