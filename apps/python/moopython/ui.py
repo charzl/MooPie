@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
 
     def update_heading(self):
         q=self.state.quotes.get(self.selected)
-        name=q.name if q else NAMES.get(self.selected,"")
+        name=q.name if q else self.state.names.get(self.selected, NAMES.get(self.selected,""))
         color=RED if q and (q.change>0)==self.state.red_up else GREEN
         suffix=f"<span style='color:{color}'>{q.price:.3f}  {q.change:+.3f}  {q.percent:+.2f}%</span>" if q else ""
         from html import escape
@@ -403,4 +403,5 @@ class MainWindow(QMainWindow):
         event.ignore()
         if not self.closing:
             self.closing=True; self.health_timer.stop(); self.flush_timer.stop(); self.setEnabled(False)
+            if self.account_page is not None: self.account_page.cleanup(); self.account_page.clear_data()
             self.gateway.shutdown()

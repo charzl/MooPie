@@ -89,7 +89,7 @@ class QuoteDelegate(QStyledItemDelegate):
         if index.column() == 0:
             painter.setFont(QFont("Arial",11,QFont.Weight.DemiBold))
             painter.setPen(QColor(TEXT))
-            name = quote.name if quote else NAMES.get(code,code)
+            name = quote.name if quote else getattr(self.state, 'names', {}).get(code, NAMES.get(code,code))
             name = painter.fontMetrics().elidedText(name,Qt.TextElideMode.ElideRight,rect.width()-12)
             painter.drawText(rect.adjusted(8,6,-4,-25),Qt.AlignmentFlag.AlignVCenter,name)
             painter.setFont(QFont("Arial",9))

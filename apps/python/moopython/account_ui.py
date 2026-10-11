@@ -5,10 +5,10 @@ from PySide6.QtCore import QTimer, Qt, QSize
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QTableWidget, QTableWidgetItem, QAbstractItemView, QWidget, QTabWidget, QListWidget, QSplitter
 
 
-def display(value):
+def display(value, precision=2):
     if value is None or isinstance(value, str) and value in ('N/A', 'nan'): return '—'
     if isinstance(value, (int, float)):
-        return f'{value:,.2f}' if math.isfinite(value) and abs(value) < 1e100 else '—'
+        return f'{value:,.{precision}f}' if math.isfinite(value) and abs(value) < 1e100 else '—'
     return str(value)
 
 
@@ -16,7 +16,8 @@ def table_rows(table, rows, columns):
     table.setRowCount(len(rows))
     for index, row in enumerate(rows):
         for column, key in enumerate(columns):
-            table.setItem(index, column, QTableWidgetItem(display(row.get(key))))
+            precision = 4 if key in ('nominal_price', 'average_cost_price') else 3 if key in ('qty', 'can_sell_qty') else 2
+            table.setItem(index, column, QTableWidgetItem(display(row.get(key), precision)))
     table.resizeColumnsToContents()
 
 
