@@ -87,6 +87,17 @@ class OptionChainService:
         self.min_interval = min_interval
         self.last_chain_call = float('-inf')
 
+    def chain(self, code, start, end, option_type=None, cancel=None):
+        cancel = cancel if cancel is not None else threading.Event()
+        delay = max(0, self.min_interval - (time.monotonic() - self.last_chain_call))
+        if cancel.wait(delay):
+            raise QueryCancelled('查询已取消')
+        self.last_chain_call = time.monotonic()
+        parameters = dict(start=start, end=end)
+        if option_type is not None:
+            parameters['option_type'] = getattr(self.sdk.OptionType, option_type)
+        return records(self.sdk, self.context.get_option_chain(code, **parameters))
+
     def query(self, query, cancel=None, progress=None):
         cancel = cancel if cancel is not None else threading.Event()
 
@@ -105,13 +116,7 @@ class OptionChainService:
             check_cancelled()
             if progress:
                 progress(dict(completed=index, total=len(windows), start=start, end=end))
-            delay = max(0, self.min_interval - (time.monotonic() - self.last_chain_call))
-            if cancel.wait(delay):
-                raise QueryCancelled('查询已取消')
-            self.last_chain_call = time.monotonic()
-            rows = records(self.sdk, self.context.get_option_chain(
-                query.code, start=start, end=end,
-                option_type=getattr(self.sdk.OptionType, query.option_type)))
+            rows = self.chain(query.code, start, end, query.option_type, cancel)
             check_cancelled()
             for row in rows:
                 expiry = row['strike_time']

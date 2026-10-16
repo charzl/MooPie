@@ -97,6 +97,15 @@ class OptionUITests(unittest.TestCase):
         self.assertFalse(self.page.cancel.isEnabled())
         self.assertFalse(self.page.export.isEnabled())
 
+    def test_existing_option_page_links_to_range_query_and_back(self):
+        self.window.show_data_page('期权')
+        single = self.window.data_pages['期权']
+        self.window.show_option_range('NVDA')
+        self.assertEqual(self.page.code.text(), 'NVDA')
+        self.assertTrue(self.window.nav_buttons['期权'].isChecked())
+        self.page.reject()
+        self.assertIs(self.window.pages.currentWidget(), single)
+
     def test_slow_query_runs_off_gui_thread_and_reports_progress(self):
         events = []
         today = OptionQuery.upcoming('AAPL').start.isoformat()

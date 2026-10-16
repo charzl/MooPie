@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from .account_ui import QueryDialog
+from .market import display_symbol
 from .options import OptionQuery, add_months, write_result
 
 
@@ -32,7 +33,7 @@ class OptionRangePage(QueryDialog):
 
         filters = QHBoxLayout()
         filters.addWidget(QLabel('标的'))
-        self.code = QLineEdit(window.selected)
+        self.code = QLineEdit(display_symbol(window.selected))
         self.code.setPlaceholderText('AAPL / US.NVDA / HK.00700')
         self.code.setMinimumWidth(220)
         filters.addWidget(self.code, 1)
@@ -122,7 +123,7 @@ class OptionRangePage(QueryDialog):
         except ValueError as error:
             self.status.setText(str(error))
             return
-        self.code.setText(query.code)
+        self.code.setText(display_symbol(query.code))
         self.send('options', code=query.code, start=query.start.isoformat(),
                   end=query.end.isoformat(), option_type=query.option_type)
         self.cancel.setEnabled(self.busy)
@@ -182,6 +183,8 @@ class OptionRangePage(QueryDialog):
             for column, key in enumerate(('strike_time', 'option_type', 'strike_price', 'code', 'name', 'lot_size', 'option_standard_type')):
                 item = QTableWidgetItem()
                 value = row.get(key)
+                if key == 'code':
+                    value = display_symbol(value)
                 item.setData(Qt.ItemDataRole.DisplayRole, value if value is not None else '—')
                 self.table.setItem(index, column, item)
         self.table.setSortingEnabled(True)

@@ -91,7 +91,9 @@ class GatewayWorker(QObject):
                 elif op == 'option_dates':
                     result = dict(rows=records(self.sdk, self.ctx.get_option_expiration_date(command['code'])))
                 elif op == 'option_chain':
-                    result = dict(rows=records(self.sdk, self.ctx.get_option_chain(command['code'], start=command['date'], end=command['date'])))
+                    if self.option_service is None:
+                        self.option_service = OptionChainService(self.sdk, self.ctx)
+                    result = dict(rows=self.option_service.chain(command['code'], command['date'], command['date']))
                 elif op == 'market_snapshots':
                     result = query_market_snapshots(self.sdk,self.ctx,command['codes'])
                 elif op == 'snapshots':
