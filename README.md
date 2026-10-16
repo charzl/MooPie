@@ -83,6 +83,8 @@ Python 版连接后，**观察** 页自动读取 moomoo 云端自选分组，无
 
 独立每日扫描模块见 [modules/rule-engine](modules/rule-engine/README.md)：标准化日线输入、版本化 JSON 规则、MA50 等指标与逐条命中证据，输出可供 Codex 读取的 JSON。模块有独立 wheel 构建和测试流程，当前尚未接入客户端的真实行情采集或 AI 调用。
 
+卖 Put 的独立规则文件见 [put_rules.py](modules/put-screener/put_rules.py)，运行说明见 [modules/put-screener](modules/put-screener/README.md)。采集脚本将合约、报价和财报日历保存为 JSON，规则文件只使用标准库，单独修改阈值后即可重跑；输出完整合格名单与财报待确认观察名单，保留权利金、现金担保、回报、风险和排除证据。
+
 MooPie 首次运行独立安装并自动启动[官方 OpenD](https://www.moomoo.com/download/OpenAPI)，请在官方窗口登录，启用本机 API（通常 `127.0.0.1:11111`），再在客户端连接设置中填入同一地址和端口。这两个实验客户端仅支持本机未加密 API 连接。账号登录与行情权限由 OpenD 管理，CI 不会登录账号。MooPie 不再内置 OpenD，复用共享安装和自动更新器；Swift/C++ 旧方案仍内置 OpenD。
 
 已验证构建、数据处理与协议校验；真实 OpenD 端到端联调和统一工作负载下的 CPU / 内存比较仍需进行。性能回放脚本仍保留供手动比较，日常打包 CI 已停止运行性能测试；这些结果不能代替真实 OpenD 和个人 Mac 上的交互比较。CPU 100% 代表一个核心，离屏截图耗时不是显示 FPS。两版 UI 框架不同，结果比较的是整套方案。

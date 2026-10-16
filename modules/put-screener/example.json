@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "source": "synthetic-example-not-market-data",
+  "session_date": "2026-10-16",
+  "collected_at": "2026-10-16T22:00:00+00:00",
+  "contracts": [{
+    "code": "US.TEST261120P90000", "symbol": "US.TEST", "currency": "USD",
+    "option_type": "PUT", "expiration": "2026-11-20", "strike": 90,
+    "standard_type": "STANDARD", "shares": 100,
+    "snapshot_symbol": "US.TEST", "snapshot_expiration": "2026-11-20",
+    "snapshot_strike": 90, "snapshot_option_type": "PUT", "snapshot_shares": 100,
+    "option_valid": true, "underlying_price": 100,
+    "market_state": "AFTER_HOURS_BEGIN", "bid": 1.5, "ask": 1.6, "bid_size": 10,
+    "volume": 100, "open_interest": 1000, "delta": -0.2, "iv_pct": 35,
+    "snapshot_update_time": "2026-10-16 15:59:00", "suspension": false,
+    "earnings": {"date": "2026-12-15", "source": "synthetic-test-only"},
+    "earnings_calendar_complete": true
+  }]
+}
