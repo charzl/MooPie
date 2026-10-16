@@ -1,4 +1,5 @@
-import importlib.util, os, pathlib, threading, unittest
+import importlib.util, json, os, pathlib, subprocess, sys, threading, unittest
+from datetime import date
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from PySide6.QtWidgets import QApplication
 import moomoo
@@ -47,4 +48,31 @@ class SDKIntegrationTests(unittest.TestCase):
    worker.execute(dict(op='chart',token='session',code='US.AAPL',period='日K',request='chart1'))
    self.assertTrue(any(kind=='chart_error' and 'mock entitlement denied' in str(data) for kind,data in events))
   finally: worker.close_context()
+ def test_official_sdk_queries_option_windows_and_preserves_symbol_type_and_strikes(self):
+  from moopython.options import OptionQuery, OptionChainService
+  first,last=self.server.option_expirations
+  query=OptionQuery('US.NVDA',date.fromisoformat(first),date.fromisoformat(last),'PUT')
+  result=OptionChainService(moomoo,self.ctx,min_interval=0).query(query)
+  self.assertEqual(len(result['contracts']),2)
+  self.assertEqual(result['expirations'],[first,last])
+  self.assertTrue(all(row['stock_owner']=='US.NVDA' and row['option_type']=='PUT' and row['strike_price']==100 for row in result['contracts']))
+  self.assertEqual(self.server.option_requests,[(first,first,2),(last,last,2)])
+  self.assertNotIn(2202,self.server.protocols)
+ def test_official_sdk_option_entitlement_failure_is_reported(self):
+  from moopython.options import OptionQuery, OptionChainService
+  self.server.reject=True
+  with self.assertRaisesRegex(RuntimeError,'mock option entitlement denied'):
+   OptionChainService(moomoo,self.ctx,min_interval=0).query(OptionQuery('AAPL',*(date.fromisoformat(day) for day in self.server.option_expirations)))
+ def test_cli_stdout_is_json_and_errors_return_nonzero(self):
+  first=self.server.option_expirations[0]
+  base=[sys.executable,'-m','moopython.options_cli','NVDA','--port',str(self.server.server_address[1]),'--start',first,'--end',first]
+  result=subprocess.run(base,capture_output=True,text=True,timeout=15)
+  self.assertEqual(result.returncode,0,result.stderr)
+  parsed=json.loads(result.stdout)
+  self.assertEqual(parsed['symbol'],'US.NVDA'); self.assertEqual(len(parsed['contracts']),2)
+  self.server.reject=True
+  failed=subprocess.run(base,capture_output=True,text=True,timeout=15)
+  self.assertNotEqual(failed.returncode,0)
+  self.assertEqual(failed.stdout,'')
+  self.assertIn('mock option entitlement denied',failed.stderr)
 if __name__=='__main__': unittest.main()

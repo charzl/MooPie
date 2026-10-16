@@ -85,6 +85,12 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python3 -m unittest discover -s tests/integration -v
+      - name: Build and install Python command-line wheel
+        run: |
+          python3 -m pip wheel --no-deps apps/python --wheel-dir artifacts/wheels
+          python3 -m pip install --no-deps artifacts/wheels/*.whl
+          moomoo-options --help
+          python3 apps/python/main.py options --help
       - name: OpenD updater tests
         run: swift test --package-path runtime
       - name: Package application
@@ -104,6 +110,7 @@ jobs:
             artifacts/python-build.json
             artifacts/*-preview.png
             artifacts/*-opend-smoke.json
+            artifacts/wheels/*.whl
           if-no-files-found: error
           retention-days: 14
           compression-level: 0

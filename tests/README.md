@@ -13,6 +13,8 @@ Shared local protobuf test peer: `tests/support/mock_opend.py`. It binds only `1
 
 ## Commands
 
+Option-chain coverage includes inclusive date ranges, calendar-month boundaries, 30-day request windows, configurable underlying/type, cancellation during rate-limit waits, deduplicated contract identities and CSV/JSON export. Official SDK integration uses option expiration/chain protobuf replies from the local peer, checks transmitted date windows and PUT filters, and surfaces entitlement errors. UI integration checks numeric strike sorting, expiry filtering/export, stale-session rejection and background responsiveness. Python CI also builds and installs the wheel and checks both command-line entry points. Real logged-in OpenD checks remain local, separate from synthetic CI fixtures.
+
 ```sh
 cd apps/python
 python3 -m unittest discover -s tests/unit -v

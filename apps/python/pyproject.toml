@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moomoo-clients"
+version = "0.2.0"
+description = "Moomoo desktop market client and option-chain command-line queries"
+requires-python = ">=3.14,<3.15"
+dynamic = ["dependencies"]
+
+[project.scripts]
+moomoo-options = "moopython.options_cli:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["moopython*"]

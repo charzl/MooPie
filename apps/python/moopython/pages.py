@@ -146,6 +146,9 @@ OPTION_QUOTE = [('last_price','最新价'),('bid_price','买价'),('ask_price','
 class OptionsPage(DataPage):
     def __init__(self, window):
         super().__init__(window,'期权')
+        ranges = QPushButton('按日期范围查询 · 未来三个月 / 导出')
+        ranges.clicked.connect(lambda: window.show_option_range(self.underlying.text()))
+        self.layout.addWidget(ranges)
         bar = QHBoxLayout(); self.underlying = QLineEdit(display_symbol(window.selected)); self.underlying.setPlaceholderText('PLTR / AAPL / HK.00700'); bar.addWidget(self.underlying)
         dates = QPushButton('获取到期日'); dates.clicked.connect(self.load_dates); bar.addWidget(dates)
         self.dates = QComboBox(); bar.addWidget(self.dates)

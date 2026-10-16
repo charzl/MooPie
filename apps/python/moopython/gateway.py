@@ -1,9 +1,11 @@
 """Official SDK calls run in one QThread; SDK pushes cross to the GUI via signals."""
 import socket
+import threading
 from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt
 from .market import PERIODS
 from .account_data import query_accounts, records
 from .market_data import query_market_snapshots
+from .options import OptionQuery, OptionChainService, QueryCancelled
 
 class GatewayWorker(QObject):
     event = Signal(str, str, object)
@@ -20,6 +22,7 @@ class GatewayWorker(QObject):
         self.port = 11111
         self.quote_subscriptions = []
         self.kline_order = []
+        self.option_service = None
 
     def close_context(self):
         if self.ctx is not None:
@@ -28,6 +31,7 @@ class GatewayWorker(QObject):
         self.subscriptions.clear()
         self.quote_subscriptions.clear()
         self.kline_order.clear()
+        self.option_service = None
 
     @Slot(object)
     def execute(self, command):
@@ -70,6 +74,15 @@ class GatewayWorker(QObject):
                 return
             if op == "refresh":
                 self.refresh(command["symbols"])
+            elif op == 'options':
+                query = OptionQuery.upcoming(command['code'], option_type=command['option_type'],
+                                             start=command['start'], end=command['end'])
+                if self.option_service is None:
+                    self.option_service = OptionChainService(self.sdk, self.ctx)
+                def progress(value):
+                    self.event.emit(token, 'options_progress', dict(value, request=command['request']))
+                result = self.option_service.query(query, command.get('cancel'), progress)
+                self.event.emit(token, 'user_data', dict(result, op=op, request=command['request']))
             elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots', 'market_snapshots'):
                 if op == 'watchlist_groups':
                     result = dict(rows=records(self.sdk, self.ctx.get_user_security_group()))
@@ -115,8 +128,8 @@ class GatewayWorker(QObject):
                 self.event.emit(token, "connection_error", f"连接失败：{error}")
             elif op == "chart":
                 self.event.emit(token, "chart_error", {"request": command["request"], "message": str(error)})
-            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots', 'market_snapshots'):
-                self.event.emit(token, 'user_data_error', dict(request=command['request'], error=str(error)))
+            elif op in ('watchlist_groups', 'watchlist', 'accounts', 'account_details', 'account_activity', 'option_dates', 'option_chain', 'snapshots', 'market_snapshots', 'options'):
+                self.event.emit(token, 'user_data_error', dict(request=command['request'], error=str(error), cancelled=isinstance(error, QueryCancelled)))
             else:
                 self.event.emit(token, "message", str(error))
 
@@ -194,6 +207,8 @@ class Gateway(QObject):
 
     def __init__(self, parent=None, sdk_factory=None):
         super().__init__(parent)
+        self.option_cancel = None
+        self.option_request = None
         self.thread = QThread(self)
         self.worker = GatewayWorker(sdk_factory=sdk_factory)
         self.worker.moveToThread(self.thread)
@@ -205,7 +220,17 @@ class Gateway(QObject):
         self.thread.start()
 
     def send(self, op, token, **fields):
+        if op in ('connect', 'disconnect', 'shutdown', 'options'):
+            self.cancel_options()
+        if op == 'options':
+            self.option_cancel = threading.Event()
+            self.option_request = fields['request']
+            fields['cancel'] = self.option_cancel
         self.command.emit(dict(op=op, token=token, **fields))
+
+    def cancel_options(self, request=None):
+        if self.option_cancel is not None and (request is None or request == self.option_request):
+            self.option_cancel.set()
 
     def shutdown(self):
         self.send("shutdown", "")

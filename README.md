@@ -48,6 +48,35 @@ C++ 构建脚本从 SDK 附带的源归档编译 protobuf 3.21.5 和 OpenSSL 3.0
 
 ## 真实行情
 
+### 期权到期日与行权价
+
+Python 客户端连接 OpenD 后，点击侧栏 **期权**，再点击 **按日期范围查询**。输入股票或 ETF 代码，选择到期日范围和 Call / Put 类型，然后点击 **查询期权链**。支持美股与港股标的，例如 `NVDA`、`US.AAPL`、`HK.00700`；无前缀默认美股。是否有期权及可用范围以 OpenD 返回为准。
+
+默认范围为标的市场今天起未来三个自然月，包含结束日，也可自定义日期或选择 1 / 3 / 6 / 12 / 24 个月。程序自动按最多 30 天分段，并限制请求频率；后台查询期间界面保持响应，支持取消。查询失败时显示 OpenD 错误，避免将部分结果显示为完整成功。
+
+结果包含到期日、Call / Put、行权价、合约代码、每份合约股数和标准类型；可按单个到期日查看并导出当前显示的 CSV / JSON。JSON 另含查询范围、市场时区和查询时间。这里展示已挂牌合约的静态信息，实时权利金需要单独获取行情。接口说明：[期权链](https://openapi.moomoo.com/moomoo-api-doc/quote/get-option-chain.html)、[到期日](https://openapi.moomoo.com/moomoo-api-doc/quote/get-option-expiration-date.html)。
+
+同一查询逻辑也提供命令行入口，方便脚本或其他程序调用。Python 3.14 下安装：
+
+```sh
+cd apps/python
+python3.14 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+
+moomoo-options NVDA --months 3 --output NVDA-options.json
+moomoo-options US.AAPL --months 3 --type PUT --format csv --output AAPL-puts.csv
+moomoo-options HK.00700 --start 2027-01-01 --end 2027-03-31 --output HK-options.json
+
+# 从源码或打包后的可执行程序调用同一命令
+python main.py options NVDA --months 3
+/Applications/MooPie.app/Contents/MacOS/MooPie options NVDA --months 3 --output NVDA-options.json
+```
+
+示例日期请替换为今天或未来的日期；OpenD 不提供已过期的期权链。未指定 `--output` 时，标准输出为 JSON / CSV，SDK 日志写到标准错误；失败返回非零退出码。命令行使用已运行并登录的本机 OpenD，默认 `127.0.0.1:11111`，可用 `--port` 修改端口。
+
+`apps/python/pyproject.toml` 提供标准 wheel 打包与 `moomoo-options` 安装入口，依赖版本沿用 `requirements.txt`。CI 构建并安装 wheel 验证命令入口，将 wheel 与现有 DMG 一并放入 Actions 的 `MooPie-macos-arm64` artifact。DMG 使用现有 PyInstaller / OpenD 打包流程，无需额外安装 Python。
+
 Python 版连接后，**观察** 页自动读取 moomoo 云端自选分组，无行情权限时仍显示代码和名称。需要转为本地列表时，点击自选列表旁的 **moomoo 自选**，获取分组、读取分组，再点击导入；导入替换本地列表并保存前一列表备份，不修改官方账号自选。完整显示当前支持的 US/HK/SH/SZ 标的；同时最多订阅 30 只报价，其余选中后按需读取，并释放旧订阅。K 线保留最多 60 组近期订阅，超出时释放旧订阅。其他市场暂时跳过并显示数量。
 
 侧栏 **账户** 使用主窗口内的账户列表、持仓和资产页签。选择开户券商、交易市场、币种，获取账户后自动查询所选账户的资产与持仓，也可点击账户卡片或“刷新资产与持仓”。区分实盘和模拟账户，账户 ID 保持完整精度，查询失败或切换连接时清空旧数据。只读查询不保存资产/持仓到磁盘；订单、历史和资金明细页签按账户及所选日期查询。账户页参考官方布局，但不是所有官方功能的完整复制。

@@ -356,13 +356,19 @@ class MainWindow(QMainWindow):
 
     def show_data_page(self, name):
         from .pages import OptionsPage, ObservePage, MarketPage
+        from .options_ui import OptionRangePage
         page = self.data_pages.get(name)
         if page is None or page.session != self.token:
             if page is not None:
                 page.cleanup(); self.pages.removeWidget(page); page.deleteLater()
-            page = {'期权': OptionsPage, '观察': ObservePage, '市场': MarketPage}[name](self)
+            page = {'期权': OptionsPage, '期权范围': OptionRangePage, '观察': ObservePage, '市场': MarketPage}[name](self)
             self.data_pages[name] = page; self.pages.addWidget(page)
-        self.pages.setCurrentWidget(page); self.check_nav(name)
+        self.pages.setCurrentWidget(page); self.check_nav('期权' if name == '期权范围' else name)
+
+    def show_option_range(self, code=None):
+        self.show_data_page('期权范围')
+        if code is not None:
+            self.data_pages['期权范围'].code.setText(code)
 
     def open_chart_code(self, code, name=''):
         try: code = symbol(code,allow_short=False)

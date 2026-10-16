@@ -3,6 +3,9 @@ import os
 import sys
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'options':
+        from moopython.options_cli import main as options_main
+        return options_main(sys.argv[2:])
     parser=argparse.ArgumentParser(description="MooPie desktop market client")
     parser.add_argument("--render-preview")
     parser.add_argument("--sdk-check", action="store_true")
