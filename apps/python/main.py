@@ -3,6 +3,9 @@ import os
 import sys
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'paper':
+        from moopython.paper_cli import main as paper_main
+        return paper_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == 'research':
         from moopython.research_cli import main as research_main
         return research_main(sys.argv[2:])
@@ -49,12 +52,14 @@ def main():
         from PySide6.QtCore import QSettings
         settings=QSettings(args.benchmark_output+".settings.ini",QSettings.Format.IniFormat)
         settings.clear()
-    window=MainWindow(settings=settings); window.show()
+    window=(MainWindow(settings=settings) if args.classic or args.benchmark_output else
+            MainWindow(settings=settings, auto_load=not args.render_preview))
+    window.show()
     if hasattr(window, 'port'): window.port.setValue(args.port)
     if args.benchmark_output:
         from moopython.benchmark import start
         start(window,args.benchmark_output)
-    if not args.render_preview and not args.benchmark_output:
+    if args.classic and not args.render_preview and not args.benchmark_output:
         QTimer.singleShot(300,lambda:window.runtime.run('launch'))
         window.opend_update_timer=QTimer(window)
         window.opend_update_timer.setInterval(24*60*60*1000)

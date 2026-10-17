@@ -1,5 +1,4 @@
 {
   "version": "10.11.7108",
-  "cpp": {"url": "https://softwaredownload.moomoo.com/MMAPI4CPP_10.11.7108.7z", "sha256": "8c94125527c166fa15470dc69346e66a3995ec6faea784a565cd0913e1199bf4"},
   "python": {"url": "https://files.pythonhosted.org/packages/13/6d/5330ebf946efe325301699050873f51c9a82cb67fe1021bb7acf70023e16/moomoo_api-10.11.7108.tar.gz", "sha256": "c46575bea768766a1d3999dded07c84e233fe17ae14f1bca971cf22bf52f95a0"}
 }

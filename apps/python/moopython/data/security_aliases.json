@@ -1,0 +1,14 @@
+[
+  {
+    "code": "US.AVGO",
+    "source": "https://investors.broadcom.com/news-releases/news-release-details/avago-technologies-acquire-broadcom-37-billion",
+    "alias_type": "historical_name",
+    "aliases": ["Avago", "Avago Technologies", "Avago Technologies Limited"]
+  },
+  {
+    "code": "US.AVGO",
+    "source": "https://www.broadcom.com/",
+    "alias_type": "company_name",
+    "aliases": ["Broadcom", "Broadcom Inc.", "博通"]
+  }
+]

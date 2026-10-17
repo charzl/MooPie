@@ -23,6 +23,8 @@ jobs:
           PYTHONPATH: apps/python
         run: |
           python -m unittest discover -s apps/python/tests/unit -p test_market_collection.py -v
+          python -m unittest discover -s apps/python/tests/unit -p test_market_repository.py -v
+          python -m unittest discover -s apps/python/tests/unit -p test_market_store.py -v
           python -m unittest discover -s apps/python/tests/mcp -v
           python -m moopython.market_data_cli --help
           python -m moopython.market_mcp --help

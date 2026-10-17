@@ -1,10 +1,11 @@
 """Preflight validated Python installer, then publish atomically through a draft."""
 import hashlib,json,os,pathlib,re,shutil,subprocess,sys
 CLIENTS=('MooPie',)
+CLIENT_BUILDS=(('MooPie','python'),)
 def collect_artifacts(root):
  root=pathlib.Path(root);target=root.with_name(root.name+'-normalized');target.mkdir(parents=True,exist_ok=True)
  names=['resolved-build.json']
- for client,prefix in zip(CLIENTS,('python','swift-cpp')):names.extend([f'{client}-macos-arm64.dmg',f'{client}-macos-arm64.validation.json',f'{prefix}-build.json',f'{prefix}-opend-smoke.json'])
+ for client,prefix in CLIENT_BUILDS:names.extend([f'{client}-macos-arm64.dmg',f'{client}-macos-arm64.validation.json',f'{prefix}-build.json',f'{prefix}-opend-smoke.json'])
  for name in names:
   matches=[path for path in root.rglob(name) if path.is_file()]
   require(bool(matches),'Missing release asset: '+name)
@@ -26,7 +27,7 @@ def preflight(root,source_commit,min_bytes=10*1024*1024):
  expected_tag=f"build-{source_commit[:12]}-sdk{manifest['sdk']['version']}-opend{manifest['opend']['version']}"
  require(manifest['release_tag']==expected_tag or re.fullmatch(re.escape(expected_tag)+r'-run[0-9]+',manifest['release_tag']) is not None,'Invalid release tag')
  files=[]
- for client,prefix in zip(CLIENTS,('python','swift-cpp')):
+ for client,prefix in CLIENT_BUILDS:
   image=root/f'{client}-macos-arm64.dmg';report=root/f'{client}-macos-arm64.validation.json'
   require(image.is_file() and image.stat().st_size>min_bytes,'Missing or truncated installer: '+client)
   with image.open('rb') as stream:stream.seek(-512,2);require(stream.read(4)==b'koly','Invalid DMG container: '+client)
@@ -69,7 +70,7 @@ SHA256SUMS.txt 可校验下载文件；resolved-build.json 记录官方源和哈
  if existing is not None:require(existing.get('draft') is True,'Release already published; refusing overwrite')
  else:call('release','create',tag,'--draft','--prerelease','--target',source_commit,'--title',f"macOS · SDK {manifest['sdk']['version']} · OpenD {manifest['opend']['version']}",'--notes-file',str(notes))
  assets=[*files,checksums,root/'resolved-build.json']
- for client,prefix in zip(CLIENTS,('python','swift-cpp')):assets.extend([root/f'{client}-macos-arm64.validation.json',root/f'{prefix}-build.json',root/f'{prefix}-opend-smoke.json'])
+ for client,prefix in CLIENT_BUILDS:assets.extend([root/f'{client}-macos-arm64.validation.json',root/f'{prefix}-build.json',root/f'{prefix}-opend-smoke.json'])
  call('release','upload',tag,*map(str,assets),'--clobber')
  found=json.loads(call('release','view',tag,'--json','assets'))['assets'];expected={p.name:p.stat().st_size for p in assets};actual={a['name']:a['size'] for a in found}
  require(all(actual.get(name)==size for name,size in expected.items()),'Release asset verification failed')

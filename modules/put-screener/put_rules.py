@@ -8,6 +8,10 @@ No broker, Qt, other rule-engine package, model, or order API is imported here.
 import argparse
 from datetime import date, datetime, time, timezone
 import hashlib
+import heapq
+from functools import cmp_to_key
+from itertools import islice
+from collections import defaultdict, Counter
 import json
 import math
 import operator
@@ -16,7 +20,7 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.6.0'
+ENGINE_VERSION = '0.7.0'
 RULESET_VERSION = '4.2.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # These remain available as optional hard filters. Oversold is not a buy signal.
@@ -219,18 +223,39 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
+def _candidate_value(row, metric):
+    if metric in ('symbol', 'expiration'): return row[metric]
+    if metric == 'earnings_date': return (row.get('earnings') or {}).get('date')
+    return finite(row['metrics'].get(metric), metric)
+
+
+def top_candidates_per_symbol(rows, order, limit):
+    """Bounded per-stock heaps followed by a sorted merge; same total ordering."""
+    def compare(left, right):
+        for metric, direction in order:
+            a, b = _candidate_value(left, metric), _candidate_value(right, metric)
+            if a is None or b is None:
+                if a is b: continue
+                return 1 if a is None else -1  # missing dates last in either direction
+            if a != b:
+                result = (a > b) - (a < b)
+                return -result if direction == 'desc' else result
+        return (left['code'] > right['code']) - (left['code'] < right['code'])
+    key = cmp_to_key(compare)
+    groups = defaultdict(list)
+    for row in rows: groups[row['symbol']].append(row)
+    lists = [heapq.nsmallest(limit, group, key=key) for group in groups.values()]
+    return list(islice(heapq.merge(*lists, key=key), limit))
+
+
 def sorted_candidates(rows, order):
     """Stable numeric, ticker and ISO-date sorting; missing events always last."""
-    def value(row, metric):
-        if metric in ('symbol', 'expiration'): return row[metric]
-        if metric == 'earnings_date': return (row.get('earnings') or {}).get('date')
-        return finite(row['metrics'].get(metric), metric)
     result = sorted(rows, key=lambda row: row['code'])
     # Stable passes preserve lower-priority tie-breakers in either direction.
     for metric, direction in reversed(order):
-        known = [row for row in result if value(row, metric) is not None]
-        missing = [row for row in result if value(row, metric) is None]
-        result = sorted(known, key=lambda row: value(row, metric), reverse=direction == 'desc') + missing
+        known = [row for row in result if _candidate_value(row, metric) is not None]
+        missing = [row for row in result if _candidate_value(row, metric) is None]
+        result = sorted(known, key=lambda row: _candidate_value(row, metric), reverse=direction == 'desc') + missing
     return result
 
 
@@ -512,7 +537,9 @@ def score_contract(values, underlying, configuration):
                 safety_contribution=(1-p['return_weight'])*(100-risk))
 
 
-def scan(dataset, budget=None, configuration=None):
+def scan(dataset, budget=None, configuration=None, *, per_symbol_limit=None):
+    if per_symbol_limit is not None and (type(per_symbol_limit) is not int or per_symbol_limit < 1):
+        raise ValueError('per_symbol_limit must be a positive integer')
     config = resolve_configuration(configuration)
     filters = configured_rules(RULES, config['filters'])
     trend_filters = configured_rules(TREND_RULES, config['trend_filters'])
@@ -583,11 +610,13 @@ def scan(dataset, budget=None, configuration=None):
                                     and values['snapshot_age_seconds'] <= LIVE_MAX_SNAPSHOT_AGE_SECONDS)))
         except (ValueError, TypeError, KeyError, OverflowError) as error:
             results.append(dict(base, status='invalid_data', eligible=False, live_review_ready=False, error=str(error)))
-    ranked = sorted_candidates((row for row in results if row['eligible']), order)
+    eligible = [row for row in results if row['eligible']]
+    select = (lambda rows, order: top_candidates_per_symbol(rows, order, per_symbol_limit)) if per_symbol_limit else sorted_candidates
+    ranked = select(eligible, order)
     for index, row in enumerate(ranked, 1): row['rank'] = index
     # Separate incomplete event checks from full eligibility. A KNOWN earnings
     # conflict is excluded; an UNKNOWN date can appear only on this watchlist.
-    watchlist = sorted_candidates((row for row in results if row['status'] == 'ok' and not row['eligible']
+    watchlist = select((row for row in results if row['status'] == 'ok' and not row['eligible']
                         and row['metrics']['earnings_known'] == 0
                         and set(row['failed_rules']) <= EARNINGS_RULES), order)
     for index, row in enumerate(watchlist, 1): row['watchlist_rank'] = index
@@ -618,7 +647,12 @@ def scan(dataset, budget=None, configuration=None):
         all_trend_rules=TREND_RULES, underlyings=trends, total_contracts=len(rows),
         missing_quote_codes=dataset.get('missing_quote_codes', []),
         calendar_errors=dataset.get('calendar_errors', []),
-        qualified_count=len(ranked), best_research_code=ranked[0]['code'] if ranked else None,
+        qualified_count=len(eligible), best_research_code=ranked[0]['code'] if ranked else None,
+        ranking_reduction=(dict(method='per_symbol_heap_then_merge', per_symbol_limit=per_symbol_limit,
+            per_symbol_candidates={symbol:min(count,per_symbol_limit) for symbol,count in Counter(row['symbol'] for row in eligible).items()},
+            merge_pool_size=sum(min(count,per_symbol_limit) for count in Counter(row['symbol'] for row in eligible).values()),
+            kept_count=len(ranked)) if per_symbol_limit else None),
+        ranked_truncated=len(ranked)<len(eligible),
         ranked_codes=[row['code'] for row in ranked], results=results,
         ranked=ranked, earnings_unverified_watchlist=watchlist,
         best_watchlist_code=watchlist[0]['code'] if watchlist else None,
@@ -634,19 +668,26 @@ def scan(dataset, budget=None, configuration=None):
         ])
 
 
-def recommend(dataset, budget=None, configuration=None, top_n=10):
+def recommend(dataset, budget=None, configuration=None, top_n=10, *, per_symbol_limit=None):
     """Hard risk boundaries -> selected return/risk ranking -> strict Top N.
 
     This is a constrained research ranking, not expected profit or an investment
-    suitability judgement. Every eligible contract is ranked; no soft score cutoff.
+    suitability judgement. No soft score cutoff; per_symbol_limit optionally
+    selects bounded per-stock candidates and merges them instead of full sorting.
     """
     if type(top_n) is not int or top_n < 1: raise ValueError('top_n must be a positive integer')
+    if per_symbol_limit is not None and (type(per_symbol_limit) is not int or per_symbol_limit < top_n):
+        raise ValueError('per_symbol_limit must be at least top_n')
     config = recommendation_configuration(configuration)
-    report = scan(dataset, budget, config)
+    report = scan(dataset, budget, config, per_symbol_limit=per_symbol_limit)
     ranked = report['ranked']
     views = {}
+    eligible = [row for row in report['results'] if row['eligible']]
     for mode, order in RANKING_SORT_ORDERS.items():
-        ordered = sorted_candidates(ranked, order)
+        if per_symbol_limit:
+            for row in ranked: row[mode + '_rank'] = None
+            ordered = top_candidates_per_symbol(eligible, order, per_symbol_limit)
+        else: ordered = sorted_candidates(ranked, order)
         views[mode] = [row['code'] for row in ordered[:top_n]]
         for index, row in enumerate(ordered, 1): row[mode + '_rank'] = index
     by_expiry = {}
@@ -656,7 +697,7 @@ def recommend(dataset, budget=None, configuration=None, top_n=10):
     for number, row in enumerate(chosen, 1):
         m = row['metrics']
         reasons = [
-            f"通过当前全部风险边界，在 {len(ranked)} 个候选中排序第 {row['rank']}。",
+            f"通过当前全部风险边界，在 {report['qualified_count']} 个候选中排序第 {row['rank']}。",
             f"每张权利金 ${m['premium_per_contract_before_costs']:,.2f} ÷ 担保现金 ${m['cash_collateral']:,.2f} ÷ {m['days_to_expiry']} 天，日均毛收益率 {m['daily_gross_return_pct']:.4f}%。",
             f"行权价 ${m['strike']:,.2f}，较现价低 {m['otm_pct']:.2f}%；费用前盈亏平衡价 ${m['breakeven_before_costs']:,.2f}。",
             f"收益分 {m['return_score']:.2f}，风险分 {m['risk_score']:.2f}（越高越危险），综合分 {m['composite_score']:.2f}。评分为未校准的研究模型。",
@@ -688,13 +729,15 @@ def recommend(dataset, budget=None, configuration=None, top_n=10):
             data_collected_at=report['collected_at'], snapshot_update_time=row['snapshot_update_time']))
     report.update(
         decision='candidates_found' if recommendations else 'no_candidates_within_boundaries',
-        decision_summary=(f"风险边界内有 {len(ranked)} 个有效合约，返回 {len(recommendations)} 份到期日/行权价比较。"
+        decision_summary=(f"风险边界内有 {report['qualified_count']} 个有效合约，返回 {len(recommendations)} 份到期日/行权价比较。"
                           if recommendations else '当前风险边界内没有有效合约；未放宽边界或补造候选。'),
         comparison_basis=dict(default_metric='daily_gross_return_pct', actual_sort_order=report['sort_order'],
             formula='100 * premium_per_contract_before_costs / cash_collateral / days_to_expiry',
             meaning='Average gross premium per calendar day on full strike cash collateral; assumes entire premium retained, not realized daily profit',
             selection_policy='First top_n contracts in the actual sort order, without expiration diversification'),
         top_n_requested=top_n, ranking_views=views,
+        auxiliary_rank_scope='top_per_symbol_limit' if per_symbol_limit else 'all_qualified',
+        expiration_comparisons_scope='retained_candidates' if per_symbol_limit else 'all_qualified',
         recommendations=recommendations, best_recommendation=recommendations[0] if recommendations else None,
         default_configuration=recommendation_configuration(),
         expiration_comparisons=[dict(expiration=expiry, best_code=row['code'], strike=row['metrics']['strike'],
@@ -702,7 +745,8 @@ def recommend(dataset, budget=None, configuration=None, top_n=10):
                                 for expiry, row in by_expiry.items()],
         boundary_origin='illustrative_basic_defaults' if configuration is None else 'explicit_configuration_over_basic_defaults',
         personal_suitability_assessed=False,
-        ranking_objective='Pass explicit hard boundaries, rank every survivor by selected return/risk/composite metrics, and return strict Top N')
+        ranking_objective=('Pass explicit hard boundaries, select per-stock Top K with bounded heaps, merge global Top N'
+            if per_symbol_limit else 'Pass explicit hard boundaries, rank every survivor by selected return/risk/composite metrics, and return strict Top N'))
     return report
 
 

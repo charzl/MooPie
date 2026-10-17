@@ -54,5 +54,13 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertEqual(marker.read_text(),'keep this')
         self.assertFalse(self.python.exists())
 
+    def test_watchlist_dispatch_preserves_json_path_and_exit_code(self):
+        source = self.root/'watchlist.json'
+        source.write_text('{"symbols":["bad code"]}', encoding='utf-8')
+        output = self.root/'watchlist output.json'
+        result = self.command('moomoo.ps1', 'watchlist', str(source), '--check-only', '--output', str(output))
+        self.assertEqual(result.returncode, 2, result.stdout+result.stderr)
+        self.assertEqual(json.loads(output.read_text(encoding='utf-8'))['status'], 'precheck_failed')
+
 
 if __name__ == '__main__': unittest.main()

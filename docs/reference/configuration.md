@@ -1,6 +1,6 @@
 # 配置参考
 
-项目目前有 Python 依赖、OpenD 连接、分析 JSON 和桌面偏好几类配置，没有统一的数据库或后台任务配置。
+项目配置包括 Python 依赖、OpenD 连接、股票名单 JSON、分析 JSON、数据库保留期和桌面偏好；不需要常驻数据库服务。
 
 ## 运行环境
 
@@ -14,6 +14,10 @@
 | MCP 宿主 | 绝对程序路径和参数，见 [MCP 指南](../guides/mcp-server.md) |
 
 Python SDK 不包含 OpenD 登录状态；配置中不需要保存密码或验证码。
+
+## 股票名单
+
+名单与规则分开维护，例如 `{"symbols":["AVGO","NVDA","US.AAPL"]}`。使用 `./moomoo watchlist LIST.json`，先验证整个名单，再逐只研究；格式、验证状态和示例见[股票列表指南](../guides/watchlists.md)。`MOOMOO_DB_PATH` 设置数据库路径，保留期通过 `./moomoo db retention --days N` 配置，见[数据库说明](../guides/database.md)。
 
 ## 分析 JSON
 
@@ -56,6 +60,6 @@ Python SDK 不包含 OpenD 登录状态；配置中不需要保存密码或验�
 
 桌面使用系统 QSettings 保存 `put_recommendation_configuration_v1` 和 `put_top_n` 等偏好。新推荐配置不会自动继承旧的全条件严格配置，也不删除旧记录。
 
-修改设置或切换 Top 数量时，复用当前完整 `input_dataset` 离线重算；刷新主按钮才重新抓取。股票或端口改变后清空缓存。导出保留原始时间和实际配置，偏好文件不能代替行情缓存。
+修改设置或切换 Top 数量时，复用当前完整 `input_dataset` 离线重算；查询按钮盘中抓取、盘后读库，显式「刷新行情」才绕过盘后读库。股票或端口改变后清空界面输入，数据库历史保留。导出保留原始时间和实际配置，偏好文件不能代替行情缓存。
 
 规则默认值只在独立文件维护；源码修改立即生效，wheel / 桌面包需要重新构建。源码加载顺序见[架构](architecture.md)。

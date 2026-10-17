@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from .market_collection import MarketDataService, opend_connection
+from .market_repository import market_data_connection
 
 
 def main(argv=None):
@@ -14,20 +14,30 @@ def main(argv=None):
     parser.add_argument('--enrich', type=Path, help='Add completed daily bars to an existing snapshot JSON; preserve quote collection time')
     parser.add_argument('--months', type=int, default=3)
     parser.add_argument('--port', type=int, default=11111)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--refresh', action='store_true', help='Force fetch all requested data')
+    mode.add_argument('--update', action='store_true', help='Fetch only missing or stale data; reuse valid cache')
+    parser.add_argument('--max-age-seconds', type=int, default=60)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         with redirect_stdout(sys.stderr):
-            with opend_connection(port=args.port) as service:
+            with market_data_connection(port=args.port, refresh=args.refresh, update=args.update, max_age_seconds=args.max_age_seconds) as service:
                 if args.enrich:
                     dataset = json.loads(args.enrich.read_text())
-                    dataset.update(service.daily_bars(dataset['symbols'], dataset['session_date'],
-                                                      cutoff=dataset['collected_at']))
+                    bars = service.daily_bars(dataset['symbols'], dataset['session_date'],
+                                              cutoff=dataset['collected_at'])
+                    # Daily enrichment must not replace the original quote provenance.
+                    daily_access = bars.pop('data_access', None)
+                    dataset.update(bars)
+                    dataset['daily_data_access'] = daily_access
                 else:
                     dataset = service.collect_put_dataset(args.symbols, args.months)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(dataset, ensure_ascii=False, allow_nan=False, indent=2) + '\n')
         print(f'Saved {len(dataset["contracts"])} contract snapshots to {args.output}')
+        access = dataset.get('data_access', {})
+        if access: print(f'Data: {access["source"]}; collected: {access["fetched_at"]}; {access["note"]}')
     except (ValueError, RuntimeError, OSError) as error:
         parser.exit(1, f'Collection failed: {error}\n')
 

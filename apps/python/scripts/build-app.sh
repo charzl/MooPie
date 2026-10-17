@@ -4,7 +4,9 @@ cd "$(dirname "$0")/.."
 python3 -m PyInstaller --noconfirm --clean --windowed --name MooPie \
   --icon ../../assets/AppIcon.icns --add-data "../../fixtures/market.json:fixtures" \
   --add-data "../../modules/put-screener/put_rules.py:." --collect-data tzdata --collect-data moopython \
+  --add-data "moopython/paper_engine.py:moopython" --add-data "moopython/paper_strategies.py:moopython" \
   --osx-bundle-identifier local.charlie.moopython --hidden-import moomoo --collect-data moomoo main.py
+python3 ../../scripts/smoke-paper.py dist/MooPie.app/Contents/MacOS/MooPie
 codesign --force --deep --sign - dist/MooPie.app
 python3 ../../scripts/bundle-opend.py --updater-only dist/MooPie.app
 # The installer contains only the client and small OpenD manager.

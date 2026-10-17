@@ -1,4 +1,4 @@
-"""Resolve one SDK/OpenD pair for both clients; skip unchanged published builds."""
+"""Resolve the Python SDK/OpenD pair; skip unchanged published builds."""
 import argparse,hashlib,json,os,pathlib,re,subprocess,urllib.request
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def version(text):
@@ -42,12 +42,12 @@ def resolve(latest,commit):
             files=release['urls']; source=next((f for f in files if f['packagetype']=='sdist' and not f.get('yanked')),None)
             if source is None: raise RuntimeError('No non-yanked official Python SDK source distribution')
             python=dict(url=checked_url(source['url'],{'files.pythonhosted.org'}),sha256=source['digests']['sha256'])
-            sdk=dict(version=sv,python=python,cpp=dict(url=f'https://softwaredownload.moomoo.com/MMAPI4CPP_{sv}.7z',sha256=None))
+            sdk=dict(version=sv,python=python)
         if ov!=opend['version']:
             opend={**opend,'version':ov,'url':f'https://softwaredownload.moomoo.com/moomoo_OpenD_{ov}_Mac.tar.gz','sha256':None}
     return dict(schema=1,source_commit=commit,sdk=sdk,opend=opend,release_tag=tag_for(commit,sdk['version'],opend['version']))
 def fill_hashes(manifest):
-    for item in (manifest['sdk']['cpp'],manifest['sdk']['python'],manifest['opend']):
+    for item in (manifest['sdk']['python'],manifest['opend']):
         checked_url(item['url'],{'softwaredownload.moomoo.com','files.pythonhosted.org'})
         if not item['sha256']: item['sha256']=digest_url(item['url'])
         if not re.fullmatch(r'[a-f0-9]{64}',item['sha256']): raise ValueError('Invalid artifact SHA-256')

@@ -8,11 +8,13 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWi
 
 from .research import load_rules
 from .research_explanation import METRICS, FLAGS, value_text
+from .desktop_preferences import DesktopPreferences
 
 
 class FilterDialog(QDialog):
     def __init__(self, configuration, report=None, has_dataset=False, parent=None):
         super().__init__(parent)
+        self.ui = parent.ui if parent and hasattr(parent,'ui') else DesktopPreferences(parent=self)
         self.engine = load_rules()
         self.initial = self.engine.recommendation_configuration(configuration)
         self.report = report
@@ -104,8 +106,10 @@ class FilterDialog(QDialog):
                 text += '\n关闭某一项仍可能为0，因为同一合约可能同时违反多项。可参考结果中的放宽预览，再自行决定。'
             status = QLabel(text); status.setWordWrap(True); outer.addWidget(status)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         apply = buttons.addButton('应用并重新筛选（已有数据）' if has_dataset else '保存设置', QDialogButtonBox.ButtonRole.AcceptRole)
         buttons.accepted.connect(self.apply); buttons.rejected.connect(self.reject); outer.addWidget(buttons)
+        self.ui.localize_tree(self)
 
     def disable_optional(self):
         for check, _ in self.controls.values(): check.setChecked(False)
@@ -140,5 +144,5 @@ class FilterDialog(QDialog):
             message = str(error)
             if message.startswith('Minimum filter exceeds'): message = '最小值不能大于最大值，请检查到期天数或 Delta 范围。'
             elif message.startswith('At least one risk'): message = '至少一项风险维度的权重需要大于0。'
-            QMessageBox.warning(self, '设置无效', message); return
+            QMessageBox.warning(self, self.ui.translate('设置无效'), self.ui.translate(message)); return
         self.accept()

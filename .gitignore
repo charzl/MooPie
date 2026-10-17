@@ -14,5 +14,8 @@
 **/vendor/**/*.pb.cc
 artifacts/
 *.spec
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 **/thirdlib
 **/build-sdk

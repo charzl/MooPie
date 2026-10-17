@@ -2,6 +2,8 @@ from contextlib import contextmanager, redirect_stdout
 from datetime import datetime
 import io
 import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -38,6 +40,33 @@ class CollectionApiTests(unittest.TestCase):
         with self.assertRaises(ValueError): service.daily_bars(['AAPL'], cutoff='2999-10-16T15:00:00+00:00')
         with self.assertRaises(ValueError): service.collect_put_dataset(['AAPL'], months=0)
 
+    def test_basic_info_preserves_authoritative_type_and_delisting(self):
+        calls = []
+        def basic(market, code_list):
+            calls.append((market, code_list))
+            return 0, Rows([dict(code='US.AVGO', name='Broadcom', stock_type='STOCK', delisting=False),
+                            dict(code='US.INVALID', name='Unknown stock.', stock_type='N/A', delisting=True)])
+        service = MarketDataService(SimpleNamespace(RET_OK=0, Market=SimpleNamespace(US='US')), SimpleNamespace(get_stock_basicinfo=basic))
+        result = service.basic_info(['AVGO', 'INVALID'])
+        self.assertEqual(calls, [('US', ['US.AVGO', 'US.INVALID'])])
+        self.assertFalse(result['rows'][0]['delisting'])
+        self.assertEqual(result['rows'][1]['stock_type'], 'N/A')
+        self.assertEqual(result['missing_codes'], [])
+
+    def test_directory_collects_both_security_types_and_propagates_partial_failure(self):
+        calls = []
+        def basic(market, stock_type):
+            calls.append((market,stock_type))
+            return 0, Rows([dict(code='US.TEST',stock_type=stock_type)])
+        sdk = SimpleNamespace(RET_OK=0,Market=SimpleNamespace(US='US'),SecurityType=SimpleNamespace(STOCK='STOCK',ETF='ETF'))
+        context = SimpleNamespace(get_stock_basicinfo=basic)
+        service = MarketDataService(sdk,context)
+        result = service.security_directory()
+        self.assertEqual(calls,[('US','STOCK'),('US','ETF')])
+        self.assertEqual(len(result['rows']),2)
+        context.get_stock_basicinfo = lambda market,stock_type: ((-1,'permission denied') if stock_type=='ETF' else (0,Rows([])))
+        with self.assertRaisesRegex(RuntimeError,'permission denied'): service.security_directory()
+
     def test_calendar_failure_propagates_and_empty_result_means_unknown(self):
         context = SimpleNamespace(get_earnings_calendar=lambda *a, **k: (0, Rows([])))
         service = MarketDataService(SimpleNamespace(RET_OK=0, Market=SimpleNamespace(US='US')), context)
@@ -53,12 +82,16 @@ class CollectionApiTests(unittest.TestCase):
         @contextmanager
         def connection(**kwargs):
             print('SDK CONNECT LOG')
-            try: yield SimpleNamespace(snapshots=lambda codes: dict(codes=codes))
+            try: yield SimpleNamespace(snapshots=lambda codes: dict(codes=codes, collected_at='2026-10-16T18:00:00+00:00'))
             finally: closed.append(True)
-        reader = OpenDReader(connection=connection)
         stream = io.StringIO()
-        with redirect_stdout(stream):
-            self.assertEqual(reader('snapshots', codes=['US.AAPL']), {'codes': ['US.AAPL']})
+        from moopython.market_store import SnapshotStore
+        with tempfile.TemporaryDirectory() as temp, redirect_stdout(stream):
+            reader = OpenDReader(connection=connection, store=SnapshotStore(Path(temp)/'market.sqlite3'),
+                                 clock=lambda: datetime.fromisoformat('2026-10-16T18:00:00+00:00'))
+            result = reader('snapshots', codes=['US.AAPL'])
+            self.assertEqual(result['codes'], ['US.AAPL'])
+            self.assertEqual(result['data_access']['source'], 'OpenD')
         self.assertEqual(stream.getvalue(), '')
         self.assertEqual(closed, [True])
         with self.assertRaises(ValueError): reader('place_order')

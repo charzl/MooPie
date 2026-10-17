@@ -1,5 +1,5 @@
 """Local test-only OpenD protobuf peer. No broker, credentials, or real market data.
-Fields follow the vendored official .proto definitions; intentionally fragments replies.
+Fields follow the official SDK .proto definitions; intentionally fragments replies.
 """
 import argparse, hashlib, json, pathlib, socketserver, struct, threading, time
 from datetime import date
