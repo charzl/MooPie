@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 import sys
 import threading
 import time
+from typing import Any
 
 from .market_collection import opend_connection
 
@@ -32,7 +33,7 @@ class OpenDReader:
 def register_tools(server, reader, annotations=None):
     """No SDK or storage calls during registration; reader is injectable in tests."""
     @server.tool(annotations=annotations)
-    def get_market_snapshots(codes: list[str]) -> dict:
+    def get_market_snapshots(codes: list[str]) -> dict[str, Any]:
         """Fetch current US stock/option snapshots (1–200 codes), including bid/ask and option Greeks.
 
         Broker snapshot timestamps do not guarantee a fresh executable bid. Missing
@@ -42,7 +43,7 @@ def register_tools(server, reader, annotations=None):
 
     @server.tool(annotations=annotations)
     def get_option_chain(symbol: str, months: int = 1, option_type: str = 'PUT',
-                         start: str | None = None, end: str | None = None) -> dict:
+                         start: str | None = None, end: str | None = None) -> dict[str, Any]:
         """Fetch listed US option contracts and strikes, without strategy filters.
 
         Dates are YYYY-MM-DD, future expirations only. Prefer short explicit date
@@ -53,7 +54,7 @@ def register_tools(server, reader, annotations=None):
 
     @server.tool(annotations=annotations)
     def get_daily_bars(symbols: list[str], session_date: str | None = None,
-                       cutoff: str | None = None) -> dict:
+                       cutoff: str | None = None) -> dict[str, Any]:
         """Fetch about 380 completed regular-session QFQ daily bars per US symbol.
 
         Request a few symbols at a time (max 20). session_date is YYYY-MM-DD;
@@ -64,7 +65,7 @@ def register_tools(server, reader, annotations=None):
         return reader('daily_bars', symbols=symbols, session_date=session_date, cutoff=cutoff)
 
     @server.tool(annotations=annotations)
-    def get_earnings_calendar(start: str, end: str) -> dict:
+    def get_earnings_calendar(start: str, end: str) -> dict[str, Any]:
         """Fetch US provider earnings listings across 1–7 calendar days (YYYY-MM-DD).
 
         An absent listing means unknown; it never establishes earnings clearance.
