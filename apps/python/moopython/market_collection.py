@@ -67,7 +67,8 @@ def collect_daily_series(sdk, context, symbols, session_date, now=None):
                 calendar_dates=expected, bars=rows))
         except Exception as error:
             series.append(dict(symbol=code, as_of=as_of, error=str(error)))
-    return dict(trend_as_of=as_of, trend_collected_at=now.isoformat(), daily_series=clean(series))
+    return dict(trend_as_of=as_of, trend_collected_at=datetime.now(timezone.utc).isoformat(),
+                trend_decision_cutoff=now.isoformat(), daily_series=clean(series))
 
 
 def collect(sdk, context, symbols, months=3):
