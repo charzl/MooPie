@@ -35,7 +35,7 @@ def main(argv=None):
                 # Validate options before making any broker request.
                 if args.action == 'put':
                     from .research import load_rules
-                    load_rules().resolve_configuration(config)
+                    load_rules().recommendation_configuration(config)
                 with opend_connection(port=args.port) as service:
                     result = run_research(service, args.symbol, args.action, config)
         emit(result)

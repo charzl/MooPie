@@ -13,7 +13,7 @@ class FilterSortDialog(QDialog):
     def __init__(self, configuration, report=None, has_dataset=False, parent=None):
         super().__init__(parent)
         self.engine = load_rules()
-        self.initial = self.engine.resolve_configuration(configuration)
+        self.initial = self.engine.recommendation_configuration(configuration)
         self.report = report
         self.has_dataset = has_dataset
         self.controls = {}
@@ -22,7 +22,7 @@ class FilterSortDialog(QDialog):
         self.setWindowTitle('Filter 过滤 / Sort 排序')
         self.resize(880, 760)
         outer = QVBoxLayout(self)
-        hint = QLabel('Filter 决定哪些合约留下；Sort 只改变留下合约的先后顺序。未勾选的条件不会拦截。')
+        hint = QLabel('Filter 是不可越过的风险边界；Sort 比较边界内的收益。初始数值仅作研究示例，请按自己的承受范围调整。趋势和财报默认作为风险提示，可勾选升级为硬限制。')
         hint.setWordWrap(True); outer.addWidget(hint)
         tabs = QTabWidget(); outer.addWidget(tabs, 1)
         page = QWidget(); filters = QVBoxLayout(page)
@@ -70,7 +70,7 @@ class FilterSortDialog(QDialog):
         sorting = QWidget(); sort_layout = QVBoxLayout(sorting)
         explanation = QLabel('依次比较第一、第二、第三排序；相同值才使用下一项。排序不会替你放宽任何 Filter。')
         explanation.setWordWrap(True); sort_layout.addWidget(explanation)
-        preferred = ['annualized_gross_return_pct', 'gross_return_pct', 'spread_pct_of_mid', 'abs_delta',
+        preferred = ['daily_gross_return_pct', 'annualized_gross_return_pct', 'gross_return_pct', 'spread_pct_of_mid', 'abs_delta',
                      'otm_pct', 'breakeven_buffer_pct', 'cash_collateral', 'days_to_expiry',
                      'premium_per_contract_before_costs']
         order = self.initial['sort_order']
@@ -100,7 +100,7 @@ class FilterSortDialog(QDialog):
         for check, _ in self.controls.values(): check.setChecked(False)
 
     def restore_filters(self):
-        defaults = self.engine.default_configuration()
+        defaults = self.engine.recommendation_configuration()
         for (group, rid), (check, field) in self.controls.items():
             check.setChecked(defaults[group][rid]['enabled'])
             if field: field.setValue(defaults[group][rid]['threshold'])

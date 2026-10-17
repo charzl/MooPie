@@ -31,12 +31,26 @@ class ResearchUiTests(unittest.TestCase):
 
     def result(self):
         return dict(action='put', symbol=self.dataset['contracts'][0]['symbol'],
-                    collected_at=self.dataset['collected_at'], report=load_rules().scan(self.dataset))
+                    collected_at=self.dataset['collected_at'], report=load_rules().recommend(self.dataset))
 
     def test_packaged_font_has_both_chinese_and_latin_glyphs(self):
         font = QRawFont.fromFont(QFont('Noto Sans SC', 14))
         self.assertTrue(font.isValid())
         for character in '股票走势Put123': self.assertTrue(font.supportsCharacter(ord(character)), character)
+
+    def test_new_profile_preserves_old_settings_and_reloads_explicit_boundaries(self):
+        settings = self.window.settings
+        old = json.dumps(load_rules().default_configuration())
+        settings.setValue('filter_sort_configuration', old)
+        self.window.close()
+        self.window = ResearchWindow(settings)
+        self.assertFalse(self.window.configuration['filters']['underlying-trend']['enabled'])
+        chosen = load_rules().recommendation_configuration(dict(filters={'max-delta': dict(threshold=.12)}))
+        settings.setValue('put_recommendation_configuration_v1', json.dumps(chosen))
+        self.window.close()
+        self.window = ResearchWindow(settings)
+        self.assertEqual(self.window.configuration, chosen)
+        self.assertEqual(settings.value('filter_sort_configuration'), old)
 
     def test_filter_editor_and_sort_editor_are_independent(self):
         dialog = FilterSortDialog(self.window.configuration, parent=self.window)
@@ -51,7 +65,8 @@ class ResearchUiTests(unittest.TestCase):
             self.assertEqual(disabled['sort_order'], original_sort)
             dialog.restore_filters()
             self.assertEqual(dialog.configuration()['sort_order'], original_sort)
-            self.assertTrue(dialog.configuration()['filters']['underlying-trend']['enabled'])
+            self.assertFalse(dialog.configuration()['filters']['underlying-trend']['enabled'])
+            self.assertTrue(dialog.configuration()['filters']['max-delta']['enabled'])
         finally: dialog.close()
 
     def test_applying_filters_reuses_data_offline_and_persists_choices(self):
@@ -84,7 +99,7 @@ class ResearchUiTests(unittest.TestCase):
         self.assertEqual(report['qualified_count'], 1)
         self.assertEqual(report['collected_at'], self.dataset['collected_at'])
         self.assertIn('财报日期或日历完整性未验证', self.window.put_result.toPlainText())
-        saved = json.loads(self.window.settings.value('filter_sort_configuration'))
+        saved = json.loads(self.window.settings.value('put_recommendation_configuration_v1'))
         self.assertFalse(saved['filters']['earnings-checked']['enabled'])
         self.assertEqual(saved['sort_order'][0], ['cash_collateral', 'asc'])
 
@@ -92,7 +107,7 @@ class ResearchUiTests(unittest.TestCase):
         result = self.result(); self.window.display(result)
         text = self.window.put_result.toPlainText()
         self.assertIn(result['report']['best_research_code'], text)
-        for phrase in ('现金担保要求', '最大亏损', '简单年化', '未校验个人资金预算'): self.assertIn(phrase, text)
+        for phrase in ('现金担保要求', '最大亏损', '简单年化', '未校验个人资金预算', '日均毛收益率', '规则引擎的到期日', '不是实际每天到账'): self.assertIn(phrase, text)
         self.assertTrue(self.window.export_button.isEnabled())
         self.window.symbol.setText('NVDA')
         self.assertFalse(self.window.results)
@@ -100,10 +115,10 @@ class ResearchUiTests(unittest.TestCase):
         self.assertFalse(self.window.export_button.isEnabled())
 
     def test_no_eligible_put_explains_failed_checks_without_picking_a_contract(self):
-        self.dataset['contracts'][0]['earnings'] = None
+        self.dataset['contracts'][0]['delta'] = -.9
         result = self.result(); self.window.display(result)
         self.assertIn('没有符合', self.window.put_result.toPlainText())
-        self.assertIn('财报日期尚未验证', self.window.put_result.toPlainText())
+        self.assertIn('|Delta|', self.window.put_result.toPlainText())
         self.assertNotIn('现金担保要求', self.window.put_result.toPlainText())
         self.assertIn('趋势条件', self.window.put_result.toPlainText())
         self.assertIn('实际值', self.window.put_result.toPlainText())

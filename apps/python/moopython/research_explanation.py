@@ -13,7 +13,8 @@ METRICS = {
     'breakdown_20d': '收盘跌破此前 20 日低点', 'rsi14': 'RSI14',
     'macd_histogram_change': 'MACD 柱较前日变化', 'cash_collateral': '现金担保（美元）',
     'annualized_gross_return_pct': '现金担保权利金简单年化',
-    'gross_return_pct': '到期现金担保回报',
+    'daily_gross_return_pct': '日均权利金毛收益率',
+    'gross_return_pct': '权利金 / 担保本金',
     'premium_per_contract_before_costs': '每张权利金（费用前）',
 }
 FLAGS = {'standard_contract', 'not_suspended', 'same_session_snapshot', 'earnings_known',
@@ -53,7 +54,7 @@ def rules_html(config):
     content += '<p>还需有有效 Bid/Ask、Put Delta、合约身份、股数及已完成日线；缺少关键数据会排除。IV 仅展示，不参与当前排序；接口返回 IV=0 时记为未知。</p>'
     order = sort_description(config['sort_order'])
     content += '<h3>通过后的排序</h3><p>' + escape(order) + '</p>'
-    content += '<p>简单年化 = Bid ÷ 行权价 × 365 ÷ 到期天数 × 100%。按一张标准合约全额现金担保，不含费用，不保证成交；桌面尚未校验个人预算。</p>'
+    content += '<p>日均毛收益率 = 权利金 ÷ 全额担保本金 ÷ 剩余自然日 × 100%；简单年化为日均值 × 365。这是完整保留权利金时的比较指标，不是实际每天盈利。按一张标准合约计算，不含费用，不保证成交；桌面尚未校验个人预算。</p>'
     content += '<p>财报未知不等于没有财报。用户关闭财报 Filter 后可留下合约，但未知状态仍会显示。</p>'
     return content
 
@@ -66,6 +67,22 @@ def ranking_html(report):
     primary = report['sort_order'][0][0]
     rows = [[row['rank'], row['code'], value_text(primary, row['metrics'][primary])] for row in report['ranked'][:10]]
     return '<h3>候选排序（前10名）</h3>' + table(['排名', '合约', METRICS.get(primary, primary)], rows)
+
+
+def recommendations_html(report):
+    choices = report.get('recommendations', [])
+    if not choices: return ''
+    content = '<h3>规则引擎的到期日 / 行权价比较</h3><p>首选是总体第一名；备选优先覆盖不同到期日，因此不一定是总体第二、三名。</p>'
+    content += table(['选择', '到期 / 行权价', '日均毛收益率', '每张权利金 / 担保本金', '总体排名'],
+        [['首选' if c['recommendation_rank'] == 1 else '备选', f"{c['expiration']} / ${c['strike']:,.2f}",
+          f"{c['daily_gross_return_pct']:.4f}%", f"${c['premium_per_contract_before_costs']:,.2f} / ${c['cash_collateral']:,.2f}",
+          c['overall_rank']] for c in choices])
+    for choice in choices:
+        content += '<p><b>' + escape(choice['code']) + '</b></p><ul>'
+        content += ''.join('<li>' + escape(reason) + '</li>' for reason in choice['reasons'] + choice['tradeoffs']) + '</ul>'
+        if choice['risk_notes']: content += '<p>需复核：' + escape('；'.join(choice['risk_notes'])) + '</p>'
+    content += '<p>日均毛收益率 = 权利金 ÷ 担保本金 ÷ 剩余自然日 × 100%。假设完整保留权利金；不是实际每天到账的收益，股价下跌可产生亏损。</p>'
+    return content
 
 
 def explanation_html(report):

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 
 from .market_collection import us_symbols
 from .runtime import OpenDRuntime
-from .research_explanation import explanation_html, sort_description, ranking_html
+from .research_explanation import explanation_html, sort_description, ranking_html, recommendations_html
 from .research import load_rules
 from .research_controls import FilterSortDialog
 
@@ -54,9 +54,9 @@ class ResearchWindow(QMainWindow):
         self.results = {}
         self.put_dataset = None
         try:
-            saved_config = self.settings.value('filter_sort_configuration', '')
-            self.configuration = load_rules().resolve_configuration(json.loads(saved_config) if saved_config else None)
-        except (ValueError, TypeError): self.configuration = load_rules().default_configuration()
+            saved_config = self.settings.value('put_recommendation_configuration_v1', '')
+            self.configuration = load_rules().recommendation_configuration(json.loads(saved_config) if saved_config else None)
+        except (ValueError, TypeError): self.configuration = load_rules().recommendation_configuration()
         self.output = bytearray()
         self.errors = bytearray()
         self.action = None
@@ -227,6 +227,7 @@ class ResearchWindow(QMainWindow):
             self.put_dataset = result.get('input_dataset')
             self.configuration = report.get('configuration', self.configuration)
             content = f'<p>检查 {report["total_contracts"]} 个合约，{report["qualified_count"]} 个通过当前 Filter。</p>'
+            content += '<p>基础边界预设为研究示例，请按个人承受范围调整。趋势偏弱及财报未知默认保留风险提示；可在设置中升级为硬限制。</p>'
             content += '<p>Sort：' + esc(sort_description(report['sort_order'])) + '</p>'
             if ranked:
                 best = ranked[0]; m = best['metrics']
@@ -234,13 +235,14 @@ class ResearchWindow(QMainWindow):
                 fields = [('行权价', f'${m["strike"]:,.2f}'), ('参考 Bid / Ask', f'${m["bid"]:.2f} / ${m["ask"]:.2f}'),
                           ('每张权利金（费用前）', f'${m["premium_per_contract_before_costs"]:,.2f}'),
                           ('现金担保要求', f'${m["cash_collateral"]:,.2f}'),
-                          ('到期收益 / 简单年化', f'{m["gross_return_pct"]:.2f}% / {m["annualized_gross_return_pct"]:.2f}%'),
+                          ('日均毛收益率（完整保留权利金）', f'{m["daily_gross_return_pct"]:.4f}%'),
+                          ('权利金 / 本金 · 简单年化', f'{m["gross_return_pct"]:.2f}% / {m["annualized_gross_return_pct"]:.2f}%'),
                           ('盈亏平衡价', f'${m["breakeven_before_costs"]:.2f}'),
                           ('价外幅度 / Delta', f'{m["otm_pct"]:.2f}% / {-m["abs_delta"]:.2f}'),
                           ('买卖价差 / 未平仓量', f'{m["spread_pct_of_mid"]:.2f}% / {m["open_interest"]:,.0f}'),
                           ('最大亏损（股价归零）', f'${m["max_loss_before_costs"]:,.2f}')]
                 content += ''.join(f'<p>{label}：<b>{value}</b></p>' for label, value in fields)
-                content += '<h3>排名原因</h3><p>通过当前已启用的 Filter，在上述 Sort 设置下排名第一。</p>'
+                content += recommendations_html(report)
                 for warning in best.get('warnings', []): content += '<p><b>需复核：' + esc(warning) + '</b></p>'
                 content += f'<p>合约快照：{esc(best["snapshot_update_time"])} · 纽约时间</p>'
                 if not best['live_review_ready']: content += '<p><b>仅供研究；交易前需核对上述风险并刷新报价。</b></p>'
@@ -251,7 +253,7 @@ class ResearchWindow(QMainWindow):
                 if unknown: content += f'<p>{unknown} 个合约仅因财报日期尚未验证，保留在导出结果的观察名单中。</p>'
             missing = len(report['missing_quote_codes'])
             if missing: content += f'<p>另有 {missing} 个合约缺少报价，未参与排名。</p>'
-            if report['calendar_errors']: content += '<p>财报日历读取不完整，相关合约无法通过财报检查。</p>'
+            if report['calendar_errors']: content += '<p>财报日历读取不完整，已保留风险提示；启用财报 Filter 时会排除相关合约。</p>'
             content += explanation_html(report)
             content += f'<p>交易日 {esc(report["session_date"])} · 规则 {esc(report["ruleset_version"])}</p><p>按一张标准合约全额现金担保计算；未校验个人资金预算。收益不含费用、不保证成交，规则尚未经回测。</p>'
         self.panel(action).setHtml(heading + content)
@@ -263,7 +265,7 @@ class ResearchWindow(QMainWindow):
         dialog = FilterSortDialog(self.configuration, report, self.put_dataset is not None, self)
         if dialog.exec() != QDialog.DialogCode.Accepted: return
         self.configuration = dialog.selected_configuration
-        self.settings.setValue('filter_sort_configuration', json.dumps(self.configuration))
+        self.settings.setValue('put_recommendation_configuration_v1', json.dumps(self.configuration))
         if self.put_dataset is not None: self.start('put', reuse=True)
         else:
             self.results.pop('put', None)

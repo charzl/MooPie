@@ -36,7 +36,7 @@ def analyze_put_dataset(dataset, symbol, configuration=None):
     code = us_symbols([symbol])[0]
     owners = set(dataset.get('symbols', [])) | {r.get('symbol') for r in dataset.get('contracts', [])}
     if owners and owners != {code}: raise ValueError('Cached dataset does not match the requested stock')
-    report = load_rules().scan(dataset, configuration=configuration)
+    report = load_rules().recommend(dataset, configuration=configuration)
     return dict(action='put', symbol=code, collected_at=dataset['collected_at'],
                 report=report, input_dataset=dataset)
 

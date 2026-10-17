@@ -15,7 +15,7 @@ command -v uv
 ./moomoo --help
 ```
 
-保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前可配置筛选分支为 `codex/configurable-put-filters`。不要为安装强制清空工作区或覆盖其他配置。
+保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前推荐功能分支为 `codex/put-recommendations`。不要为安装强制清空工作区或覆盖其他配置。
 
 项目要求 Python `>=3.14,<3.15`。默认安装 CLI/MCP，桌面是可选功能。不修改系统 Python，不要求用户手动激活虚拟环境。以 `apps/python/pyproject.toml` 和 `requirements.txt` 为依赖依据，更新版本时同步检查构建依赖。
 
@@ -128,7 +128,11 @@ tool_timeout_sec = 120
 
 趋势分析报告数据日期/时区、考察期限、指标值、关键价位和改判条件；只使用已完成日线，不把规则命中数当成经过校准的涨跌概率。Put 结果查看 `ranked`、财报未验证观察名单、`failed_rules`、预算及快照时间。空结果保留，不为产生候选自动放宽规则；未知财报不推断成无财报。
 
-Filter 与 Sort 分离：`scan(dataset, budget=None, configuration=None)` 接受用户明确选择的开关、阈值及独立排序。CLI 用 `--config`；规则默认值仍在同一独立 Python 文件。标准合约/未停牌与基础有效性检查不能关闭。用户可显式关闭趋势或两项财报 Filter；此时相关未知/风险状态仍展示，不能声称已验证。`filter_impact` / `relaxation_preview` 是模拟数量，不是自动放宽授权。
+Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(dataset, budget=None, configuration=None, top_n=3)`。先按基础风险边界过滤，再按权利金/全额担保本金/剩余自然日排序，所有符合边界者均排序，无额外软分数门槛。首选和优先覆盖不同到期日的备选由引擎返回，不由 UI 拼装策略。查看 `best_recommendation` / `recommendations` 的日期、行权价、日均毛收益率、理由、取舍、风险和到期损益情景；这是假设完整保留权利金的比较值，不是每日实际利润。
+
+`RECOMMENDATION_BOUNDARIES` 为未校准的示例预设：7–90天、价外幅度≥0、绝对Delta≤0.30、Bid≥0.10、买盘数量≥1、价差≤15%、同交易日报价，及标准合约/未停牌。个人风险范围未确认，不将示例阈值当成用户认可；预算未提供必须标记。趋势/财报/最低Delta/成交量/未平仓量默认不拦截，可通过 `--config` 显式启用为硬限制。基础有效性检查始终执行；任何已启用边界不可因高收益或结果为空而自动越过。`scan()` / `--scan-only` 保留原全条件扫描，调用时说明两者默认配置不同。`filter_impact` / `relaxation_preview` 只模拟数量。
+
+新版 GUI 用独立设置键 `put_recommendation_configuration_v1`，保留旧设置且不自动继承旧全条件配置。已有新版配置继续复用，不随意重置用户选择。恢复默认 Filter 使用 `recommendation_configuration()`。趋势描述与风险提示不随过滤开关消失。
 
 桌面配置界面在 `research_controls.py`，不是第二套规则。修改配置后优先通过研究子进程的 `--input` 离线重算现有 `input_dataset`，保持原始 `collected_at`；点击主抓取按钮才刷新。股票/端口改变后丢弃缓存；导出包含数据、实际配置和证据。日线抓取失败需保留期权数据和明确错误：启用趋势 Filter 时阻止候选，用户关闭后可继续其他过滤。
 

@@ -155,9 +155,12 @@ class PutRuleTests(unittest.TestCase):
             source = Path(temp) / 'input.json'; output = Path(temp) / 'out.json'; csv = Path(temp) / 'out.csv'
             source.write_text(json.dumps(self.dataset))
             command = [sys.executable, '-I', str(ROOT / 'put_rules.py'), str(source), '--output', str(output), '--csv-output', str(csv)]
-            result = subprocess.run(command, capture_output=True, text=True)
+            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(output.read_text())['qualified_count'], 1)
+            report = json.loads(output.read_text(encoding='utf-8'))
+            self.assertEqual(report['qualified_count'], 1)
+            self.assertEqual(report['best_recommendation']['strike'], 90)
+            self.assertIn('daily_gross_return_pct', csv.read_text(encoding='utf-8'))
             self.assertIn('qualified,1,US.TEST', csv.read_text())
             source.write_text('{}'); output.unlink()
             self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)

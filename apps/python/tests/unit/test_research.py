@@ -27,7 +27,7 @@ class ResearchTests(unittest.TestCase):
         service = self.service(); code = self.dataset['contracts'][0]['symbol']
         result = run_research(service, code, 'put')
         self.assertEqual(service.query, ([code], 3))
-        self.assertEqual(result['report']['ranked'], load_rules().scan(self.dataset)['ranked'])
+        self.assertEqual(result['report'], load_rules().recommend(self.dataset))
         self.dataset['contracts'][0]['bid'] = 0
         self.assertFalse(run_research(self.service(), code, 'put')['report']['ranked'])
 
@@ -45,11 +45,14 @@ class ResearchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'permission denied'):
             run_research(self.service(), code, 'trend')
 
-    def test_partial_and_invalid_data_stay_excluded(self):
+    def test_missing_history_is_flagged_and_can_be_explicitly_made_a_veto(self):
         code = self.dataset['contracts'][0]['symbol']
         self.dataset['daily_series'][0]['bars'].pop()
         result = run_research(self.service(), code, 'put')
-        self.assertFalse(result['report']['ranked'])
+        self.assertTrue(result['report']['ranked'])
+        self.assertIn('历史日线无法验证', result['report']['best_recommendation']['risk_notes'])
+        config = dict(filters={'underlying-trend': dict(enabled=True)})
+        self.assertFalse(run_research(self.service(), code, 'put', config)['report']['ranked'])
         with self.assertRaises(ValueError): run_research(self.service(), 'HK.00700', 'trend')
 
     def test_cached_data_can_be_refiltered_offline_and_keeps_original_time(self):

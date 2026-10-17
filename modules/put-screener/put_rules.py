@@ -1,6 +1,7 @@
 """Editable, standalone cash-secured PUT research rules. Python standard library only.
 
-Edit TREND_RULES / RULES / SORT_ORDER below, increase RULESET_VERSION, and rerun.
+Edit RECOMMENDATION_BOUNDARIES / TREND_RULES / RULES / SORT_ORDER below,
+increase RULESET_VERSION, and rerun.
 No broker, Qt, other rule-engine package, model, or order API is imported here.
 """
 import argparse
@@ -14,10 +15,10 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.3.0'
-RULESET_VERSION = '2.0.0'
+ENGINE_VERSION = '0.4.0'
+RULESET_VERSION = '3.0.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
-# All must pass BEFORE comparing put premiums. Oversold alone is not a buy signal.
+# These remain available as optional hard filters. Oversold is not a buy signal.
 TREND_RULES = [
     ('above-ma50', 'distance_to_ma50_pct', '>=', 0),
     ('ma50-not-falling', 'ma50_slope_5d_pct', '>=', 0),
@@ -43,9 +44,9 @@ RULES = [
     ('earnings-buffer', 'days_expiry_before_earnings', '>=', 3),
     ('underlying-trend', 'trend_allowed', '==', 1),
 ]
-# Among contracts passing EVERY rule, maximize simple annualized gross premium
-# on full strike cash collateral; ties favor tighter spreads / lower delta.
-SORT_ORDER = [('annualized_gross_return_pct', 'desc'), ('spread_pct_of_mid', 'asc'), ('abs_delta', 'asc')]
+# Among survivors, maximize daily gross premium on full strike cash collateral;
+# ties favor tighter spreads / lower delta.
+SORT_ORDER = [('daily_gross_return_pct', 'desc'), ('spread_pct_of_mid', 'asc'), ('abs_delta', 'asc')]
 LIVE_MAX_SNAPSHOT_AGE_SECONDS = 900
 OPS = {'>': operator.gt, '>=': operator.ge, '<': operator.lt,
        '<=': operator.le, '==': operator.eq}
@@ -53,7 +54,7 @@ NY = ZoneInfo('America/New_York')
 METRICS = frozenset(('bid', 'ask', 'shares', 'strike', 'underlying_price', 'days_to_expiry',
     'abs_delta', 'iv_pct', 'volume', 'open_interest', 'bid_size', 'spread_pct_of_mid', 'otm_pct',
     'breakeven_before_costs', 'breakeven_buffer_pct', 'premium_per_contract_before_costs',
-    'cash_collateral', 'gross_return_pct', 'annualized_gross_return_pct', 'max_profit_before_costs',
+    'cash_collateral', 'gross_return_pct', 'daily_gross_return_pct', 'annualized_gross_return_pct', 'max_profit_before_costs',
     'max_loss_before_costs', 'pnl_at_spot_minus_20_pct', 'standard_contract', 'not_suspended',
     'same_session_snapshot', 'snapshot_age_seconds', 'earnings_known', 'days_expiry_before_earnings',
     'trend_allowed', 'strike_below_20d_low_atr'))
@@ -63,6 +64,33 @@ EARNINGS_RULES = frozenset(('earnings-checked', 'earnings-buffer'))
 # Supported-contract boundaries, shown separately from optional strategy filters.
 REQUIRED_FILTERS = frozenset(('standard-contract', 'not-suspended'))
 SORTABLE_METRICS = METRICS - {'iv_pct', 'days_expiry_before_earnings', 'strike_below_20d_low_atr'}
+# Illustrative basic boundaries, not a statement of any user's risk tolerance.
+# Preferences such as RSI, momentum, minimum OI and minimum Delta are not vetoes.
+RECOMMENDATION_BOUNDARIES = {
+    'standard-contract': 1, 'not-suspended': 1, 'same-session-snapshot': 1,
+    'min-days': 7, 'max-days': 90, 'otm-buffer': 0, 'max-delta': .30,
+    'min-bid': .10, 'bid-size': 1, 'spread': 15,
+}
+
+
+def recommendation_configuration(configuration=None):
+    result = default_configuration()
+    for rid, option in result['filters'].items():
+        option['enabled'] = rid in RECOMMENDATION_BOUNDARIES
+        if option['enabled']: option['threshold'] = float(RECOMMENDATION_BOUNDARIES[rid])
+    if configuration is not None:
+        if not isinstance(configuration, dict): raise ValueError('Configuration must be an object')
+        if set(configuration) - result.keys(): raise ValueError('Invalid filter configuration keys')
+        for key, value in configuration.items():
+            if key in ('filters', 'trend_filters'):
+                if not isinstance(value, dict) or set(value) - result[key].keys():
+                    raise ValueError('Unknown filter in ' + key)
+                for rid, options in value.items():
+                    if not isinstance(options, dict) or set(options) - {'enabled', 'threshold'}:
+                        raise ValueError('Invalid filter options: ' + rid)
+                    result[key][rid].update(options)
+            else: result[key] = value
+    return resolve_configuration(result)
 
 
 def default_configuration():
@@ -325,6 +353,7 @@ def metrics(row, session_date, collected_at):
         breakeven_buffer_pct=100 * (spot - breakeven) / spot,
         premium_per_contract_before_costs=credit, cash_collateral=cash,
         gross_return_pct=100 * credit / cash,
+        daily_gross_return_pct=100 * credit / cash / dte,
         annualized_gross_return_pct=100 * credit / cash * 365 / dte,
         max_profit_before_costs=credit, max_loss_before_costs=cash - credit,
         pnl_at_spot_minus_20_pct=credit - max(strike - spot * .8, 0) * shares,
@@ -475,27 +504,97 @@ def scan(dataset, budget=None, configuration=None):
         ])
 
 
+def recommend(dataset, budget=None, configuration=None, top_n=3):
+    """Hard risk boundaries -> daily premium yield ranking -> date/strike comparison.
+
+    This is a constrained research ranking, not expected profit or an investment
+    suitability judgement. Every eligible contract is ranked; no soft score cutoff.
+    """
+    if type(top_n) is not int or top_n < 1: raise ValueError('top_n must be a positive integer')
+    config = recommendation_configuration(configuration)
+    report = scan(dataset, budget, config)
+    ranked = report['ranked']
+    by_expiry = {}
+    for row in ranked: by_expiry.setdefault(row['expiration'], row)
+    chosen = list(by_expiry.values())[:top_n]
+    used = {row['code'] for row in chosen}
+    for row in ranked:
+        if len(chosen) >= top_n: break
+        if row['code'] not in used: chosen.append(row)
+    recommendations = []
+    for number, row in enumerate(chosen, 1):
+        m = row['metrics']
+        reasons = [
+            f"通过当前全部风险边界，在 {len(ranked)} 个候选中排序第 {row['rank']}。",
+            f"每张权利金 ${m['premium_per_contract_before_costs']:,.2f} ÷ 担保现金 ${m['cash_collateral']:,.2f} ÷ {m['days_to_expiry']} 天，日均毛收益率 {m['daily_gross_return_pct']:.4f}%。",
+            f"行权价 ${m['strike']:,.2f}，较现价低 {m['otm_pct']:.2f}%；费用前盈亏平衡价 ${m['breakeven_before_costs']:,.2f}。",
+        ]
+        notes = list(row['warnings'])
+        if not report['budget_checked']: notes.append('尚未提供单张现金预算，未判断担保资金是否适合个人账户')
+        if not row['live_review_ready']: notes.append('仅按采集时点研究比较；交易前需复核风险并刷新报价')
+        comparisons = [f"|Delta|={m['abs_delta']:.3f}，买卖价差为中间价的 {m['spread_pct_of_mid']:.2f}%。",
+                       f"最大权利金收益 ${m['max_profit_before_costs']:,.2f}，股票归零时最大亏损 ${m['max_loss_before_costs']:,.2f}；不含费用。"]
+        if row['rank'] != 1:
+            comparisons.append(f"作为不同到期日/行权价的备选；其排序低于总体第一名 {ranked[0]['code']}。")
+        scenarios = [dict(stock_change_pct=change,
+                          stock_price=m['underlying_price']*(1+change/100),
+                          pnl_before_costs=m['premium_per_contract_before_costs'] -
+                          max(m['strike']-m['underlying_price']*(1+change/100), 0)*m['shares'])
+                     for change in (0, -10, -20, -30, -100)]
+        recommendations.append(dict(
+            recommendation_rank=number, overall_rank=row['rank'], code=row['code'], symbol=row['symbol'],
+            expiration=row['expiration'], strike=m['strike'], days_to_expiry=m['days_to_expiry'],
+            bid=m['bid'], ask=m['ask'], premium_per_contract_before_costs=m['premium_per_contract_before_costs'],
+            cash_collateral=m['cash_collateral'], daily_gross_return_pct=m['daily_gross_return_pct'],
+            gross_return_pct=m['gross_return_pct'], annualized_gross_return_pct=m['annualized_gross_return_pct'],
+            breakeven_before_costs=m['breakeven_before_costs'], max_loss_before_costs=m['max_loss_before_costs'],
+            reasons=reasons, tradeoffs=comparisons, risk_notes=notes, scenarios=scenarios,
+            data_collected_at=report['collected_at'], snapshot_update_time=row['snapshot_update_time']))
+    report.update(
+        decision='candidates_found' if recommendations else 'no_candidates_within_boundaries',
+        decision_summary=(f"风险边界内有 {len(ranked)} 个有效合约，返回 {len(recommendations)} 份到期日/行权价比较。"
+                          if recommendations else '当前风险边界内没有有效合约；未放宽边界或补造候选。'),
+        comparison_basis=dict(default_metric='daily_gross_return_pct', actual_sort_order=report['sort_order'],
+            formula='100 * premium_per_contract_before_costs / cash_collateral / days_to_expiry',
+            meaning='Average gross premium per calendar day on full strike cash collateral; assumes entire premium retained, not realized daily profit',
+            selection_policy='Best overall first, then best per distinct expiration, then remaining highest ranked contracts'),
+        recommendations=recommendations, best_recommendation=recommendations[0] if recommendations else None,
+        default_configuration=recommendation_configuration(),
+        expiration_comparisons=[dict(expiration=expiry, best_code=row['code'], strike=row['metrics']['strike'],
+                                     overall_rank=row['rank'], daily_gross_return_pct=row['metrics']['daily_gross_return_pct'])
+                                for expiry, row in by_expiry.items()],
+        boundary_origin='illustrative_basic_defaults' if configuration is None else 'explicit_configuration_over_basic_defaults',
+        personal_suitability_assessed=False,
+        ranking_objective='Pass explicit hard boundaries, rank every survivor by selected capital/time return metric, and explain date/strike alternatives')
+    return report
+
+
 def main(argv=None):
+    import sys
+    if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description='Standalone, editable cash-secured PUT research rules')
     parser.add_argument('input', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--budget', type=float, help='Maximum USD cash for ONE assigned contract; omitted means not checked')
     parser.add_argument('--config', type=Path, help='JSON with explicit filter toggles/thresholds and independent sort_order')
     parser.add_argument('--csv-output', type=Path, help='Export qualified candidates and the separate earnings-unverified watchlist')
-    parser.add_argument('--top', type=int, default=10)
+    parser.add_argument('--top', type=int, default=3)
+    parser.add_argument('--scan-only', action='store_true', help='Use the legacy full-filter scan without date/strike recommendations')
     args = parser.parse_args(argv)
     try:
         if args.top < 1: raise ValueError('--top must be positive')
         config = json.loads(args.config.read_text(encoding='utf-8')) if args.config else None
-        report = scan(json.loads(args.input.read_text(encoding='utf-8')), args.budget, config)
+        dataset = json.loads(args.input.read_text(encoding='utf-8'))
+        report = scan(dataset, args.budget, config) if args.scan_only else recommend(dataset, args.budget, config, args.top)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + '\n', encoding='utf-8')
         if args.csv_output:
             import csv
-            columns = ['category', 'rank', 'code', 'symbol', 'expiration', 'bid', 'ask', 'days_to_expiry',
+            columns = ['category', 'rank', 'code', 'symbol', 'expiration', 'strike', 'bid', 'ask', 'days_to_expiry',
                        'abs_delta', 'otm_pct', 'spread_pct_of_mid', 'volume', 'open_interest',
                        'premium_per_contract_before_costs', 'cash_collateral', 'gross_return_pct',
-                       'annualized_gross_return_pct', 'breakeven_before_costs', 'max_loss_before_costs',
+                       'daily_gross_return_pct', 'annualized_gross_return_pct', 'breakeven_before_costs', 'max_loss_before_costs',
                        'pnl_at_spot_minus_20_pct', 'live_review_ready', 'snapshot_update_time', 'blocked_rules',
                        'earnings_known', 'trend_allowed', 'warnings']
             args.csv_output.parent.mkdir(parents=True, exist_ok=True)
@@ -509,13 +608,18 @@ def main(argv=None):
                                              blocked_rules=','.join(row['failed_rules']), warnings='; '.join(row.get('warnings', []))))
         print(f'{report["qualified_count"]} / {report["total_contracts"]} contracts pass every rule; session {report["session_date"]}')
         print('Research ranking; gross estimates before costs. Refresh quotes and confirm earnings before any trade.')
+        if not args.scan_only:
+            print(report['decision_summary'])
+            for choice in report['recommendations']:
+                print(f"Choice {choice['recommendation_rank']}: {choice['expiration']} strike={choice['strike']:.2f} daily_gross={choice['daily_gross_return_pct']:.4f}%")
+                for reason in choice['reasons'] + choice['tradeoffs'] + choice['risk_notes']: print('  ' + reason)
         for symbol, underlying in report['underlyings'].items():
             if underlying['status'] == 'ok':
                 m = underlying['metrics']
                 print(f'{symbol} trend={underlying["state"]} as_of={underlying["as_of"]} '
                       f'close={m["close"]:.2f} MA50={m["ma50"]:.2f} RSI14={m["rsi14"]:.1f} '
                       f'allowed={underlying["allowed"]} failed={",".join(underlying["failed_rules"])}')
-            else: print(f'{symbol} trend blocked: {underlying["error"]}')
+            else: print(f'{symbol} trend unavailable: {underlying["error"]}')
         for row in report['ranked'][:args.top]:
             m = row['metrics']
             print(f'{row["rank"]:2} {row["code"]:27} bid={m["bid"]:.2f} DTE={m["days_to_expiry"]:2} '

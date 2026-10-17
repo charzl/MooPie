@@ -4,7 +4,17 @@
 
 Filter 决定保留哪些合约，Sort 独立决定保留者的顺序。`TREND_RULES`、`RULES`、`SORT_ORDER` 是可编辑的默认值；每次运行可通过 JSON `configuration` 覆盖开关、阈值和排序，不改变默认值。已启用的 Filter 必须全部通过；关闭的条件不再排除，但相关风险仍保留。标准100股/未停牌和计算所需基础数据检查始终执行。报告记录实际配置、指纹和输入数据指纹，便于复现。
 
-新增指标或修改默认规则时仍只编辑同一 `put_rules.py`，提高 `RULESET_VERSION`。`scan(dataset, budget=None, configuration=None)` 的第三个参数即用户配置。
+新增指标或修改默认规则时仍只编辑同一 `put_rules.py`，提高 `RULESET_VERSION`。日常入口是 `recommend(dataset, budget=None, configuration=None, top_n=3)`，CLI 和桌面均使用它。基础边界由同一文件的 `RECOMMENDATION_BOUNDARIES` 定义；`recommendation_configuration()` 返回该配置。旧的 `scan()` / CLI `--scan-only` 保留原全部条件启用的默认配置，用于单独审查和兼容。
+
+规则引擎直接返回：
+
+- `decision` / `decision_summary`：边界内是否有候选；没有时保留空结果。
+- `best_recommendation`：总体排序第一名的日期、行权价、权利金、担保本金、日均毛收益率及盈亏平衡。
+- `recommendations`：默认最多三项，首选之后优先覆盖不同到期日，再补充其他高排名合约。`overall_rank` 与完整 `ranked` 对应，备选不一定是总体第二名。
+- 每个推荐的 `reasons`、`tradeoffs`、`risk_notes`、`scenarios`：选择依据、Delta/价差/最大亏损、未知信息及到期时股价不变或下跌10/20/30/100%的损益（费用前）。UI 直接展示这些结果。
+- `expiration_comparisons`：每个到期日的最优合约；`comparison_basis`：公式、实际排序和选择策略；实际配置与原始指纹仍保留。
+
+默认排名为 **日均权利金毛收益率 = 每张 Bid 权利金 ÷ 全额现金担保本金 ÷ 剩余自然日 × 100%**。假设完整保留权利金，不是每天实际盈利，也不是扣除风险后的预期回报。例：$200 / $10,000 / 30 ×100%=0.0667%/天。硬边界限定允许承担的风险后，才比较该指标；没有额外软分数门槛。
 
 ## 采集与运行
 
@@ -33,18 +43,18 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
 {
   "schema": 1,
   "filters": {
-    "open-interest": {"threshold": 100},
+    "open-interest": {"enabled": true, "threshold": 100},
     "underlying-trend": {"enabled": false}
   },
   "sort_order": [["abs_delta", "asc"], ["spread_pct_of_mid", "asc"]]
 }
 ```
 
-运行 `./moomoo analyze input.json --config filters.json --output ranking.json`。未指定项继承默认值，字段拼错、重复排序或最小值高于最大值会报错。趋势子条件用 `trend_filters`，例如 `{"rsi-floor":{"enabled":false}}`。允许未知财报需显式关闭 `earnings-checked` 和 `earnings-buffer` 两项；关闭前者而保留后者，未知日期仍无法通过间隔检查。
+运行 `./moomoo analyze input.json --config filters.json --output ranking.json`。未指定项继承推荐基础预设，字段拼错、重复排序或最小值高于最大值会报错。趋势子条件用 `trend_filters`，例如 `{"rsi-floor":{"enabled":false}}`，总开关 `underlying-trend` 需启用才作硬限制。财报默认只提示；若显式启用任一财报条件，未知日期可能被拦截；关闭前者而保留间隔检查，未知日期仍无法通过。
 
-## 股票趋势先筛选
+## 股票趋势证据与可选硬限制
 
-先计算每个股票的日线趋势，再筛选其 Put。默认五个硬条件定义在独立文件顶部的 `TREND_RULES`，只是待验证的初始研究假设，不是经过回测的收益优势：
+先计算每个股票的日线趋势，再分析其 Put。推荐模式默认将趋势作为风险提示；用户可将 `underlying-trend` 显式启用为硬限制，再选择下面的子条件。`scan()` 兼容模式默认要求全部通过。这五个条件定义在独立文件顶部的 `TREND_RULES`，只是待验证的初始研究假设，不是经过回测的收益优势：
 
 | 条件 | 初始阈值 |
 | --- | --- |
@@ -77,19 +87,21 @@ apps/python/.venv/bin/python scripts/collect-put-data.py \
 | --- | --- |
 | 合约 | 标准 100 股、未停牌、合约表与快照标的/日期/行权价/股数一致 |
 | 数据 | 正数且未倒挂的 Bid/Ask；快照属于最新交易日；Put Delta 合法 |
-| 期限 | 21–60 个自然日 |
-| 价外空间 | `(股价−行权价)÷股价 ≥5%` |
-| Delta | 绝对值 0.15–0.30 |
+| 期限 | 7–90 个自然日 |
+| 价外空间 | `(股价−行权价)÷股价 ≥0%` |
+| Delta | 绝对值 ≤0.30；不设置最低Delta门槛 |
 | 买盘 | Bid ≥$0.10、买盘数量 ≥1 |
-| 流动性 | 未平仓量 ≥200、当日成交量 ≥10 |
+| 流动性 | 未平仓量和成交量展示；最低阈值默认不拦截，可选启用 |
 | 价差 | `(Ask−Bid)÷((Ask+Bid)/2) ≤15%` |
-| 财报 | 数据源列出下一次财报，且合约至少提前 3 个自然日到期 |
-| 股票趋势 | 必须通过上述全部趋势条件；缺少日线时不放行 |
+| 财报 | 默认未知或跨财报提示风险；可选启用“日期已知”和“至少提前3天到期” |
+| 股票趋势 | 默认参考及风险提示；启用硬限制后需通过所选趋势条件 |
 | 预算 | 可选：行权价×100 不超过传入预算；未提供时明确标记未检查 |
 
-通过全部已启用 Filter 后，默认按 `Bid÷行权价×365÷剩余天数` 从高到低排序，并列时比较价差、绝对Delta，最后按合约代码固定顺序。用户可独立修改 `sort_order`；Sort 不改变候选集合。默认简单年化比较未经回测，不代表预期或可重复收益。
+上述数值是研究示例，不是用户已认可的个人风险上限。标准合约/未停牌和基础数据校验始终执行；其他边界可显式调整，任何已启用条件都不能为凑结果而自动放宽。原兼容 `scan()` 默认仍为21–60天、价外≥5%、Delta0.15–0.30、未平仓量≥200、成交量≥10、财报与趋势全部通过。
 
-期限和年化统一以输入的 `session_date` 为报价基准日。周末重跑上一个交易日的输入，得到的仍是该交易日的研究排名。
+通过全部已启用 Filter 后，默认按 `Bid÷行权价÷剩余天数×100%` 从高到低排序，并列时比较价差、绝对Delta，最后按合约代码固定顺序。用户可独立修改 `sort_order`；Sort 不改变候选集合。日均毛收益率乘365等于简单年化，排序相同；该比较未经回测，不代表预期或可重复收益。
+
+期限、日均和年化统一以输入的 `session_date` 为报价基准日。周末重跑上一个交易日的输入，得到的仍是该交易日的研究排名。
 
 每份合约的计算：
 
@@ -103,7 +115,7 @@ apps/python/.venv/bin/python scripts/collect-put-data.py \
 
 ## 合格与待确认名单
 
-`ranked` 只包含基础校验和全部已启用 Filter 通过的合约。默认财报未知仍是 `eligible=false`；其余已选条件通过时进入 `earnings_unverified_watchlist`。用户明确关闭两项财报 Filter 后，合约可进入当前配置的排名，但 `warnings` 保留未验证状态，`live_review_ready=false`。已知财报冲突同样不会因关闭 Filter 而消除提示。
+`ranked` 只包含基础校验和全部已启用 Filter 通过的合约。推荐模式默认财报未知不拦截，但 `warnings` 保留未验证状态，`live_review_ready=false`。启用财报硬限制后，未知日期仍是 `eligible=false`；其余条件通过时进入 `earnings_unverified_watchlist`。已知财报冲突同样不会因关闭 Filter 而消除提示。
 
 `filter_impact` 显示单项排除数与仅关闭该项后的候选数；`relaxation_preview` 模拟关闭趋势、财报或两者后的数量。计数可重叠，这些模拟不修改配置。桌面可用已采集数据离线重新筛选；时间仍是原始采集时点，不表示刷新了报价。
 
