@@ -52,6 +52,7 @@ class ResearchWindow(QMainWindow):
         self.output = bytearray()
         self.errors = bytearray()
         self.action = None
+        self.cancelled = False
         self.workspace = tempfile.TemporaryDirectory(prefix='moomoo-research-')
         self.result_path = Path(self.workspace.name) / 'result.json'
         self.runtime = OpenDRuntime(self)
@@ -118,6 +119,7 @@ class ResearchWindow(QMainWindow):
             self.status.setText(str(error)); return
         self.settings.setValue('symbol', code.removeprefix('US.'))
         self.action = action
+        self.cancelled = False
         self.results.pop(action, None)
         self.export_button.setEnabled(bool(self.results))
         self.panel(action).setHtml(f'<h2>{esc(code)}</h2><p>正在抓取和分析…</p>')
@@ -157,6 +159,11 @@ class ResearchWindow(QMainWindow):
         if process is None: return
         self.output.extend(bytes(process.readAllStandardOutput()))
         self.read_progress(process)
+        if self.cancelled:
+            self.panel(self.action).setPlainText('本次分析已取消。可以重新输入股票并开始查询。')
+            self.status.setText('已取消；没有生成本次分析结果。')
+            self.release_process()
+            return
         try:
             result = json.loads(self.result_path.read_text(encoding='utf-8')) if self.result_path.exists() else json.loads(self.output.decode('utf-8'))
             if exit_code or result.get('error'):
@@ -225,6 +232,7 @@ class ResearchWindow(QMainWindow):
 
     def cancel(self):
         if self.process:
+            self.cancelled = True
             self.process.kill()
 
     def export(self):

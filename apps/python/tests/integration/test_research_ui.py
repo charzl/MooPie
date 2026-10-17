@@ -70,3 +70,18 @@ class ResearchUiTests(unittest.TestCase):
         self.assertTrue(process.waitForStarted(3000))
         self.window.close()
         self.assertEqual(process.state(), QProcess.ProcessState.NotRunning)
+
+    def test_cancel_returns_to_idle_without_reporting_a_data_error(self):
+        import sys
+        process = QProcess(self.window); self.window.process = process; self.window.action = 'trend'
+        process.finished.connect(self.window.finished)
+        process.start(sys.executable, ['-c', 'import time; time.sleep(60)'])
+        self.assertTrue(process.waitForStarted(3000))
+        self.window.busy(True); self.window.cancel()
+        deadline = time.monotonic() + 5
+        while self.window.process is not None and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.01)
+        self.assertIsNone(self.window.process)
+        self.assertIn('已取消', self.window.trend_result.toPlainText())
+        self.assertNotIn('检查 OpenD', self.window.trend_result.toPlainText())
+        self.assertTrue(self.window.trend_button.isEnabled())

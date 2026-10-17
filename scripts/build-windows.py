@@ -16,6 +16,7 @@ def main():
                     '--collect-data', 'tzdata', '--add-data', f'{ROOT / "modules/put-screener/put_rules.py"}:.',
                     '--add-data', f'{ROOT / "fixtures/market.json"}:fixtures', 'main.py'], cwd=app, check=True)
     binary = app/'dist/MooPie/MooPie.exe'
+    subprocess.run([str(binary), '--sdk-check'], check=True, timeout=90)
     preview = ROOT/'artifacts/MooPie-windows-preview.png'
     preview.parent.mkdir(exist_ok=True)
     subprocess.run([str(binary), '--render-preview', str(preview)], check=True, timeout=90)
