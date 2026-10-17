@@ -1,5 +1,11 @@
 # MooPie · Moomoo 行情研究工具
 
+<img width="1518" height="1035" alt="Screenshot 2026-10-17 at 1 56 39 AM" src="https://github.com/user-attachments/assets/0723947a-bcf2-4a03-b73c-ed8bf816a654" />
+
+
+
+
+
 支持 macOS 和 Windows，通过本机 moomoo OpenD 查询美股行情。
 
 - **筛选卖出 Put**：选择股票、Filter 和排序方式，返回 Top 5 / 10 / 20 候选，展示收益、风险、到期日及担保成本。
