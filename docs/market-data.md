@@ -30,7 +30,7 @@ with market_data_connection() as data:
     dataset = data.collect_put_dataset(['AVGO', 'NVDA'], months=3)
 ```
 
-原始采集接口只返回可 JSON 序列化的数据，不写文件、不算策略指标；上面的共享路由在盘中抓取并保存，盘后只查 SQLite。首次无匹配快照时可显式 `market_data_connection(refresh=True)`，详见[数据库说明](guides/database.md)。需要始终实时的底层接口仍为 `market_collection.opend_connection`，`doctor` 使用它。`snapshots` 接受 1–200 个股票或期权代码，保留全部 broker 字段、时间、来源和缺失代码；`daily_bars` 返回约 550 个自然日范围内的已完成复权日线，包含实际可用交易日期。多股票批量采集上限 20。当前这些研究接口支持美股；现有桌面的其他市场功能不受影响。
+原始采集接口只返回可 JSON 序列化的数据，不写文件、不算策略指标；上面的共享路由在盘中抓取并保存，盘后优先查SQLite，缺少匹配快照时自动请求OpenD并保存。批量请求仅补抓缺失成员；`market_data_connection(refresh=True)` 强制重抓，详见[数据库说明](guides/database.md)。需要始终实时的底层接口仍为 `market_collection.opend_connection`，`doctor` 使用它。`snapshots` 接受 1–200 个股票或期权代码，保留全部 broker 字段、时间、来源和缺失代码；`daily_bars` 返回约 550 个自然日范围内的已完成复权日线，包含实际可用交易日期。多股票批量采集上限 20。当前这些研究接口支持美股；现有桌面的其他市场功能不受影响。
 
 已有 `OptionChainService` 继续承担期权链的日期拆分、限流和数据验证。完整 Put 采集通过同一组基础接口组合，不在 MCP 内另写采集或规则逻辑。MCP 调用串行执行，并在调用间留出 OpenD 限流间隔；使用完关闭 quote context。多个独立进程仍共享券商限额，可能收到限流错误。
 

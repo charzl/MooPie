@@ -17,7 +17,7 @@ launcher = (['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Fil
 def run(*args):
     subprocess.run(args, check=True)
 
-for command in ('options', 'collect', 'analyze', 'mcp', 'doctor', 'db', 'watchlist'):
+for command in ('options', 'collect', 'analyze', 'mcp', 'doctor', 'db', 'watchlist', 'paper'):
     run(*launcher, command, '--help')
 for directory, pattern in [('tests/unit', 'test_setup_*.py'), ('apps/python/tests/unit', 'test_doctor.py'),
                            ('apps/python/tests/unit', 'test_market_collection.py'), ('apps/python/tests/mcp', 'test*.py'),
@@ -26,6 +26,9 @@ for directory, pattern in [('tests/unit', 'test_setup_*.py'), ('apps/python/test
                            ('apps/python/tests/unit', 'test_security_directory.py'),
                            ('apps/python/tests/unit', 'test_watchlist*.py'),
                            ('apps/python/tests/unit', 'test_research*.py'),
+                           ('apps/python/tests/unit', 'test_saved_research.py'),
+                           ('apps/python/tests/unit', 'test_price_signals.py'),
+                           ('apps/python/tests/unit', 'test_paper*.py'),
                            ('modules/put-screener/tests', 'test*.py')]:
     run(sys.executable, '-m', 'unittest', 'discover', '-s', directory, '-p', pattern, '-v')
 run(*launcher, 'analyze', 'modules/put-screener/example.json', '--output', 'artifacts/platform-check/report.json')

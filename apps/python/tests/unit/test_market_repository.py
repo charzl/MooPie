@@ -116,18 +116,29 @@ class RepositoryTests(unittest.TestCase):
                          {k: v for k, v in saved.items() if k != 'data_access'})
         self.assertEqual(saved['collected_at'], '2026-10-16T18:00:00+00:00')
 
-    def test_cache_miss_never_opens_live_and_requires_explicit_refresh(self):
+    def test_after_hours_first_query_fetches_saves_and_second_query_stays_offline(self):
         self.now = moment('2026-10-17T12:00:00+00:00')
         with self.service() as service:
-            with self.assertRaisesRegex(RuntimeError, 'refresh'):
-                service.collect_put_dataset(['TEST'])
-        self.assertFalse(self.opened)
-        with self.service(refresh=True) as service:
             result = service.collect_put_dataset(['TEST'])
-        self.assertTrue(result['data_access']['explicit_refresh'])
+        self.assertEqual(result['data_access']['source'], 'OpenD')
+        self.assertTrue(result['data_access']['cache_miss_fetch'])
+        self.assertFalse(result['data_access']['explicit_refresh'])
         with self.service() as service:
             self.assertEqual(service.collect_put_dataset(['TEST'])['data_access']['source'], 'database')
         self.assertEqual(len(self.opened), 1)
+
+    def test_after_hours_failed_first_fetch_is_an_error_and_preserves_cached_stock(self):
+        with self.service() as service: service.collect_put_dataset(['TEST'])
+        self.now = moment('2026-10-17T12:00:00+00:00')
+        @contextmanager
+        def unavailable(**kwargs):
+            raise RuntimeError('OpenD unavailable for US.CBRS')
+            yield
+        with market_data_connection(store=self.store,clock=lambda:self.now,connection=unavailable) as service:
+            with self.assertRaisesRegex(RuntimeError,'CBRS'):
+                service.collect_put_dataset(['CBRS'])
+            self.assertEqual(service.collect_put_dataset(['TEST'])['data_access']['source'],'database')
+        self.assertEqual(self.store.status()['snapshots'],1)
 
     def test_all_read_operations_share_router_and_cache(self):
         for operation, kwargs in [
@@ -150,14 +161,16 @@ class RepositoryTests(unittest.TestCase):
         with self.service() as service: service.collect_put_dataset(['TEST'])
         self.now = moment('2026-10-17T12:00:00+00:00')
         for kwargs in (dict(symbols=['OTHER']), dict(symbols=['TEST'], months=1)):
-            with self.service() as service, self.assertRaises(RuntimeError):
-                service.collect_put_dataset(**kwargs)
-        with self.service(port=12345) as service, self.assertRaises(RuntimeError):
-            service.collect_put_dataset(['TEST'])
+            with self.service() as service:
+                self.assertEqual(service.collect_put_dataset(**kwargs)['data_access']['source'],'OpenD')
+        with self.service(port=12345) as service:
+            self.assertEqual(service.collect_put_dataset(['TEST'])['data_access']['source'],'OpenD')
         self.now = moment('2026-10-19T22:00:00+00:00')
-        with self.service() as service, self.assertRaisesRegex(RuntimeError, '2026-10-19'):
-            service.collect_put_dataset(['TEST'])
-        self.assertEqual(len(self.opened), 1)
+        with self.service() as service:
+            result=service.collect_put_dataset(['TEST'])
+        self.assertEqual(result['data_access']['market']['session_date'],'2026-10-19')
+        self.assertEqual(result['data_access']['source'],'OpenD')
+        self.assertEqual(len(self.opened), 5)
 
     def test_closed_trend_rejects_snapshot_missing_latest_completed_day(self):
         with self.service() as service:
@@ -339,6 +352,7 @@ class MultiStockTests(unittest.TestCase):
         def fetch(operation, **parameters):
             self.calls.append((operation, parameters))
             names = parameters.get('symbols', parameters.get('codes'))
+            if 'US.MISSING' in names: raise RuntimeError('US.MISSING: provider data unavailable')
             if operation == 'snapshots':
                 return dict(codes=names, collected_at=self.now.isoformat(),
                             rows=[dict(code=code, bid_price=index+1) for index, code in enumerate(names)], missing_codes=[])
@@ -415,7 +429,26 @@ class MultiStockTests(unittest.TestCase):
                 service.collect_put_dataset(['AAA', 'MISSING'])
             saved = service.collect_put_dataset(['AAA'])
             self.assertEqual(saved['symbols'], ['US.AAA'])
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_closed_batch_automatically_fetches_only_the_uncached_stock(self):
+        with self.service() as service: service.collect_put_dataset(['AAA'])
+        self.closed()
+        with self.service() as service: result=service.collect_put_dataset(['AAA','BBB'])
+        self.assertEqual(result['data_access']['source'],'mixed')
+        self.assertEqual([m['source'] for m in result['data_access']['members']],['database','OpenD'])
+        self.assertEqual(self.calls[1],('collect_put_dataset',dict(symbols=['US.BBB'],months=3)))
+        self.assertEqual(len(self.calls),2)
+        with self.service() as service: cached=service.collect_put_dataset(['BBB','AAA'])
+        self.assertEqual(cached['data_access']['source'],'database')
+        self.assertEqual(len(self.calls),2)
+
+    def test_entirely_uncached_after_hours_batch_is_collected_in_one_request(self):
+        self.closed()
+        with self.service() as service: result=service.collect_put_dataset(['AAA','BBB'])
+        self.assertEqual(result['data_access']['source'],'OpenD')
+        self.assertTrue(result['data_access']['cache_miss_fetch'])
+        self.assertEqual(self.calls,[('collect_put_dataset',dict(symbols=['US.AAA','US.BBB'],months=3))])
 
     def test_adjusted_missing_contract_root_is_preserved_without_guessing_owner(self):
         from moopython.market_payloads import project

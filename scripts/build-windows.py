@@ -15,6 +15,8 @@ def main():
                     '--name', 'MooPie', '--hidden-import', 'moomoo', '--collect-data', 'moomoo',
                     '--collect-data', 'tzdata', '--add-data', f'{ROOT / "modules/put-screener/put_rules.py"}:.',
                     '--collect-data', 'moopython',
+                    '--add-data', 'moopython/paper_engine.py:moopython',
+                    '--add-data', 'moopython/paper_strategies.py:moopython',
                     '--add-data', f'{ROOT / "fixtures/market.json"}:fixtures', 'main.py'], cwd=app, check=True)
     binary = app/'dist/MooPie/MooPie.exe'
     subprocess.run([str(binary), '--sdk-check'], check=True, timeout=90)
@@ -29,6 +31,7 @@ def main():
     import json
     assert process.returncode == 1 and json.loads(result.read_text(encoding='utf-8'))['error']
     subprocess.run([sys.executable, str(ROOT/'scripts/smoke-research.py'), str(binary)], check=True, timeout=150)
+    subprocess.run([sys.executable, str(ROOT/'scripts/smoke-paper.py'), str(binary)], check=True, timeout=90)
     shutil.make_archive(str(app/'dist/MooPie-windows-x64'), 'zip', root_dir=app/'dist', base_dir='MooPie')
 
 

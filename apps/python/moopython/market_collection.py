@@ -32,7 +32,8 @@ def completed_session(days, now):
     return max(completed)
 
 
-def collect_daily_series(sdk, context, symbols, session_date, now=None):
+def collect_daily_series(sdk, context, symbols, session_date, now=None, adjustment='qfq'):
+    if adjustment not in ('qfq','none'): raise ValueError('Unsupported daily adjustment')
     now = now or datetime.now(timezone.utc)
     quote_day = date.fromisoformat(session_date)
     start = quote_day - timedelta(days=550)
@@ -45,13 +46,13 @@ def collect_daily_series(sdk, context, symbols, session_date, now=None):
     expected = sorted({row['time'] for row in days if row['time'] <= as_of})
     series = []
     for code in symbols:
-        print(f'Collecting completed QFQ daily bars: {code}, through {as_of}', file=sys.stderr)
+        print(f'Collecting completed {adjustment} daily bars: {code}, through {as_of}', file=sys.stderr)
         try:
             rows, page, seen = [], None, set()
             while True:
                 ret, frame, next_page = context.request_history_kline(
                     code, start=start.isoformat(), end=as_of, ktype=sdk.KLType.K_DAY,
-                    autype=sdk.AuType.QFQ, max_count=1000, page_req_key=page,
+                    autype=sdk.AuType.QFQ if adjustment=='qfq' else sdk.AuType.NONE, max_count=1000, page_req_key=page,
                     extended_time=False, session=sdk.Session.RTH)
                 if ret != sdk.RET_OK: raise RuntimeError(str(frame))
                 for row in frame.to_dict('records'):
@@ -62,7 +63,7 @@ def collect_daily_series(sdk, context, symbols, session_date, now=None):
                 if next_page in seen: raise ValueError('Repeated history pagination key')
                 seen.add(next_page); page = next_page
             series.append(dict(symbol=code, source='moomoo OpenD request_history_kline',
-                interval='1d', adjustment='qfq', session='regular', as_of=as_of,
+                interval='1d', adjustment=adjustment, session='regular', as_of=as_of,
                 available_at=available, trade_date_type=kind,
                 calendar_dates=expected, bars=rows))
         except Exception as error:
@@ -195,6 +196,10 @@ class MarketDataService:
         present = {row['code'] for row in rows}
         return clean(dict(schema=1, source='moomoo OpenD', collected_at=datetime.now(timezone.utc).isoformat(),
                           codes=codes, rows=rows, missing_codes=[code for code in codes if code not in present]))
+
+    def paper_inputs(self, symbols):
+        from .paper_data import collect_paper_inputs
+        return collect_paper_inputs(self.sdk,self.context,symbols)
 
     def basic_info(self, codes):
         """Authoritative symbol/type/delisting metadata; does not require quotes."""

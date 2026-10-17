@@ -17,6 +17,8 @@
 | [筛选卖出 Put](guides/put-screening.md) | 先 Filter、再 Sort、最后取 Top 5/10/20 |
 | [Watchlist 与预检查](guides/watchlists.md) | 验证全部股票代码，再逐只返回 Put / 走势 |
 | [分析股票趋势](guides/trend-analysis.md) | 获取已完成日线，解释走势证据和改判条件 |
+| [股票策略模拟盘](guides/paper-trading.md) | 创建虚拟客户、更新前向记录、单独回测及比较1 / 3 / 6个月 |
+| [公开策略研究](research/stock-strategies.md) | 基金与论文的信号来源、简化实现及局限 |
 | [配置 MCP](guides/mcp-server.md) | 接入本地 stdio 服务，分别验证配置、发现和调用 |
 | [数据库与盘中 / 盘后查询](guides/database.md) | SQLite 路由、主动刷新、数据时点与历史保留 |
 | [测试与真实行情验证](guides/functional-testing.md) | 哪些检查离线运行，哪些需要已登录 OpenD |

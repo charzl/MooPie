@@ -48,12 +48,13 @@ class ScoreDelegate(ValueDelegate):
         rect = QRectF(option.rect)
         track = QRectF(rect.left()+12, rect.center().y()-3, max(20, rect.width()-62), 6)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor('#2c313d')); painter.drawRoundedRect(track, 3, 3)
+        colors = getattr(option.widget, 'colors', {})
+        painter.setBrush(QColor(colors.get('track', '#2c313d'))); painter.drawRoundedRect(track, 3, 3)
         fill = QRectF(track); fill.setWidth(track.width()*max(0, min(100, value))/100)
         gradient = QLinearGradient(track.topLeft(), track.topRight())
         gradient.setColorAt(0, QColor('#649fff')); gradient.setColorAt(1, QColor('#a28aff'))
         painter.setBrush(gradient); painter.drawRoundedRect(fill, 3, 3)
-        painter.setPen(QColor('#e8ebf3'))
+        painter.setPen(QColor(colors.get('text', '#e8ebf3')))
         painter.drawText(QRectF(rect.right()-43, rect.top(), 36, rect.height()),
                          Qt.AlignmentFlag.AlignCenter, f'{value:.0f}')
         painter.restore()
@@ -94,7 +95,8 @@ class CandidateTable(QTableWidget):
         self.horizontalHeaderItem(5).setToolTip('点击按 Bid 数值排序；再次点击切换方向。Ask 作为参考显示。')
         self.horizontalHeaderItem(11).setToolTip('按列示的财报日期排序；日期缺失时始终排在最后，未验证状态继续保留。')
         self.setItemDelegateForColumn(13, ScoreDelegate(self))
-        self.setMinimumHeight(160)
+        # Reserve five complete candidate rows plus the header and scrollbar.
+        self.setMinimumHeight(5*self.verticalHeader().defaultSectionSize()+64)
         self.setItemDelegate(ValueDelegate(self))
 
     def request_sort(self, column):
@@ -103,6 +105,18 @@ class CandidateTable(QTableWidget):
         if self.order and self.order[0][0] == metric:
             direction = 'desc' if self.order[0][1] == 'asc' else 'asc'
         self.sort_requested.emit(metric, direction)
+
+    def apply_colors(self, colors):
+        self.colors=colors
+        for row in range(self.rowCount()):
+            for column in range(self.columnCount()):
+                item=self.item(row,column)
+                if item is None: continue
+                color=colors['accent'] if column in (8,9) else colors['text']
+                if column==11:
+                    color=colors['warning'] if item.data(Qt.ItemDataRole.UserRole+3) else colors['muted']
+                item.setForeground(QColor(color))
+        self.viewport().update()
 
     def show_report(self, report):
         self.blockSignals(True)
@@ -147,6 +161,7 @@ class CandidateTable(QTableWidget):
                 if col == 10:
                     item.setToolTip('现价到费用前盈亏平衡价的距离，由规则引擎计算；不代表不会跌破。')
                 if col == 11:
+                    item.setData(Qt.ItemDataRole.UserRole+3, not known or event_score>0)
                     item.setForeground(QColor('#e9b45f' if not known or event_score > 0 else '#949bad'))
                     item.setToolTip('券商日历列示日期；未验证不等于没有财报。' + (f'\n日期：{earnings["date"]}' if earnings else ''))
                 if col == 12: item.setToolTip('风险分 0–100，越低越好；不是亏损概率。')
@@ -155,5 +170,6 @@ class CandidateTable(QTableWidget):
                     item.setToolTip(f'综合分 {m["composite_score"]:.2f} / 100，越高越好；使用当前收益和风险权重。')
                 self.setItem(index, col, item)
         self.blockSignals(False)
+        if hasattr(self,'ui'): self.ui.localize_table(self,fresh=True)
         self.scrollToTop()
         if choices: self.selectRow(0)

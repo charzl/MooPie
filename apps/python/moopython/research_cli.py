@@ -23,12 +23,14 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--refresh', action='store_true', help='Force fetch all requested data, even after hours')
     mode.add_argument('--update', action='store_true', help='Reuse valid snapshots; fetch only missing or stale stocks')
+    mode.add_argument('--saved', action='store_true', help='Show saved closing results, even intraday; auto-fetch only a never-collected single stock')
     parser.add_argument('--max-age-seconds', type=int, default=60, help='Intraday quote cache validity for --update (1–3600 seconds)')
     args = parser.parse_args(argv)
+    output_stream = sys.stdout
     def emit(value):
         document = json.dumps(value, ensure_ascii=False, allow_nan=False)
         if args.output: args.output.write_text(document, encoding='utf-8')
-        elif sys.stdout is not None: print(document)
+        elif output_stream is not None: print(document,file=output_stream)
     if sys.stderr is None: sys.stderr = open(os.devnull, 'w', encoding='utf-8')
     try:
         if args.action == 'sync-directory':
@@ -56,7 +58,7 @@ def main(argv=None):
             if args.symbol and args.watchlist: raise ValueError('Choose a single stock or --watchlist, not both')
             use_watchlist = not args.symbol
             if args.input:
-                if args.refresh or args.update: raise ValueError('--input cannot be combined with --refresh or --update')
+                if args.refresh or args.update or args.saved: raise ValueError('--input cannot be combined with --refresh, --update or --saved')
                 if args.action != 'put': raise ValueError('--input is only supported for Put filtering')
                 dataset = json.loads(args.input.read_text(encoding='utf-8'))
                 if use_watchlist:
@@ -69,6 +71,24 @@ def main(argv=None):
                 if args.action == 'put':
                     from .research import load_rules
                     load_rules().recommendation_configuration(config)
+                if args.saved:
+                    from .saved_research import saved_research, SavedMarketData
+                    from .market_repository import CacheMissError
+                    from .watchlist_store import WatchlistStore
+                    from .watchlist import load_watchlist
+                    from .market_collection import us_symbols
+                    values = (us_symbols([args.symbol]) if args.symbol else
+                              load_watchlist(args.watchlist) if args.watchlist else WatchlistStore().symbols())
+                    if not values: raise ValueError('Watchlist 为空，请先加入股票。')
+                    try:
+                        result = saved_research(values,args.action,config,args.top,port=args.port,watchlist=use_watchlist)
+                        emit(result)
+                        return 0
+                    except CacheMissError:
+                        if use_watchlist or not SavedMarketData(values,args.port).never_collected(values[0],args.action):
+                            raise
+                        # Preserve first-query collection for a new single stock;
+                        # existing intraday-only/stale data requires Update Quotes.
                 with market_data_connection(port=args.port, refresh=args.refresh, update=args.update, max_age_seconds=args.max_age_seconds) as service:
                     if use_watchlist:
                         from .watchlist_store import WatchlistStore
@@ -79,6 +99,9 @@ def main(argv=None):
                         result = run_watchlist_research(service, values, args.action, config, args.top)
                     else:
                         result = run_research(service, args.symbol, args.action, config, args.top)
+            if args.action=='put':
+                from .saved_research import remember_closing_result
+                remember_closing_result(result,args.port)
         emit(result)
         return 0
     except Exception as error:

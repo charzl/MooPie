@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 from uuid import uuid4
 import zlib
 
@@ -42,7 +43,17 @@ class SnapshotStore:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
             if not 0 <= version <= SCHEMA_VERSION:
                 raise RuntimeError('Unsupported market database schema; use the matching application version')
-            connection.execute('PRAGMA journal_mode=WAL')
+            # SQLite's journal-mode transition can return BUSY immediately even
+            # with busy_timeout when two fresh processes initialize the file.
+            deadline = time.monotonic()+10
+            while True:
+                try:
+                    connection.execute('PRAGMA journal_mode=WAL')
+                    break
+                except sqlite3.OperationalError as error:
+                    if getattr(error,'sqlite_errorcode',0) & 255 != sqlite3.SQLITE_BUSY or time.monotonic() >= deadline:
+                        raise
+                    time.sleep(.02)
             if version < SCHEMA_VERSION:
                 # Serialize migration and recheck after acquiring the lock: another
                 # process might have upgraded the same database while we waited.
@@ -100,6 +111,10 @@ class SnapshotStore:
                 (request_key, session_date)).fetchone()
         if row is None:
             return None
+        return self._decode(row)
+
+    @staticmethod
+    def _decode(row):
         try:
             raw = zlib.decompress(row[4])
             if hashlib.sha256(raw).hexdigest() != row[3]:
@@ -108,6 +123,22 @@ class SnapshotStore:
         except (zlib.error, UnicodeError, ValueError) as error:
             raise RuntimeError('Market database snapshot is damaged; refresh explicitly') from error
         return dict(id=row[0], fetched_at=row[1], saved_at=row[2], payload=payload, batch_id=row[5])
+
+    def record(self, snapshot_id):
+        with self.connect() as connection:
+            row = connection.execute('''SELECT id, fetched_at, saved_at, checksum, payload, batch_id
+                FROM snapshots WHERE id=?''', (snapshot_id,)).fetchone()
+        if row is None:
+            raise RuntimeError('已保存的行情已清理，请点击「更新行情」。')
+        return self._decode(row)
+
+    def records(self, operation):
+        """Read the small snapshot index without decompressing market payloads."""
+        with self.connect() as connection:
+            rows = connection.execute('''SELECT id, request_key, session_date, fetched_at
+                FROM snapshots WHERE operation=? ORDER BY session_date DESC, fetched_at DESC, id DESC''',
+                (operation,)).fetchall()
+        return [dict(id=r[0], request_key=r[1], session_date=r[2], fetched_at=r[3]) for r in rows]
 
     @staticmethod
     def _days(value, allow_zero=False):

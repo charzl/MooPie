@@ -3,6 +3,9 @@ import os
 import sys
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'paper':
+        from moopython.paper_cli import main as paper_main
+        return paper_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == 'research':
         from moopython.research_cli import main as research_main
         return research_main(sys.argv[2:])

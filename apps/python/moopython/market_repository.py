@@ -1,4 +1,4 @@
-"""Shared session router: live collection during trading, persisted snapshots after.
+"""Shared session router: live during trading, cache first after hours.
 
 The live connection is lazy: cache-only requests never open a socket/import the SDK.
 Raw collection and strategy analysis remain separate from this storage policy.
@@ -71,6 +71,7 @@ class CachedMarketData:
                 parts.append(single)
                 members.append(dict(subject=subject, snapshot_id=single['id'], batch_id=single['batch_id'],
                                     fetched_at=single['fetched_at']))
+        if missing and not parts: return None
         if missing:
             raise CacheMissError('盘后数据库缺少这些股票 / 合约的匹配快照：' + ', '.join(missing)
                                + '。请使用 --refresh 主动采集；已有股票的数据仍保留。')
@@ -86,7 +87,7 @@ class CachedMarketData:
         if collected > now: return False
         if operation == 'basic_info':
             return set(parameters['codes']) <= {row.get('code') for row in saved['payload'].get('rows', [])}
-        if operation == 'daily_bars':
+        if operation in ('daily_bars','paper_inputs'):
             if parameters.get('cutoff') or parameters.get('session_date'): return True
             expected = session['session_date']
             if session['is_open']: expected = previous_session(date.fromisoformat(expected)-timedelta(days=1)).isoformat()
@@ -101,6 +102,22 @@ class CachedMarketData:
         if kind == 'stocks': close = time(20)
         return collected >= datetime.combine(day, close, NY)
 
+    def _members(self, operation, parameters, kind, session):
+        field, subjects = partition(operation, parameters)
+        parts = [self._call(operation, dict(parameters, **{field:[subject]}), kind, [underlying(subject)])
+                 for subject in subjects]
+        result = assemble(parts, operation, parameters)
+        members = [dict(subject=subject, **part['data_access']) for subject,part in zip(subjects,parts)]
+        sources = {part['data_access']['source'] for part in parts}
+        result['data_access'] = dict(source=next(iter(sources)) if len(sources)==1 else 'mixed',
+            fetched_at=max((part['data_access']['fetched_at'] for part in parts), key=datetime.fromisoformat),
+            snapshot_id=None, batch_id=None, explicit_refresh=False, market=session,
+            members=members, cache_miss_fetch=any(m.get('cache_miss_fetch',False) for m in members),
+            note=('逐项检查缓存，只补抓缺失或过期数据；成员保留各自采集时间。' if self.update else
+                  '盘后逐项读库，缺少的股票自动抓取；成员保留各自采集时间。'))
+        if self.update: result['data_access']['incremental_update'] = True
+        return result
+
     def _call(self, operation, parameters, kind, symbols=()):
         now = self.clock()
         session = market_session(now, kind, symbols)
@@ -108,26 +125,23 @@ class CachedMarketData:
             self.maintenance = self.store.maybe_cleanup(self.clock())
             self.maintenance_checked = True
         saved = None
+        cache_first = not self.refresh and not session['is_open']
         if self.update:
             field, subjects = partition(operation, parameters)
             if len(subjects) > 1:
-                parts = [self._call(operation, dict(parameters, **{field:[subject]}), kind, [underlying(subject)])
-                         for subject in subjects]
-                result = assemble(parts, operation, parameters)
-                members = [dict(subject=subject, **part['data_access']) for subject,part in zip(subjects,parts)]
-                sources = {part['data_access']['source'] for part in parts}
-                result['data_access'] = dict(source=next(iter(sources)) if len(sources)==1 else 'mixed',
-                    fetched_at=max((part['data_access']['fetched_at'] for part in parts), key=datetime.fromisoformat),
-                    snapshot_id=None, batch_id=None, explicit_refresh=False, market=session,
-                    incremental_update=True, members=members,
-                    note='逐项检查缓存，只补抓缺失或过期数据；成员保留各自采集时间。')
-                return result
+                return self._members(operation, parameters, kind, session)
             saved = self._read(operation, parameters, session['session_date'])
-            if operation == 'daily_bars' and session['is_open'] and not saved and not parameters.get('cutoff') and not parameters.get('session_date'):
+            if operation in ('daily_bars','paper_inputs') and session['is_open'] and not saved and not parameters.get('cutoff') and not parameters.get('session_date'):
                 previous = previous_session(date.fromisoformat(session['session_date'])-timedelta(days=1)).isoformat()
                 saved = self._read(operation, parameters, previous)
             if not self._reusable(saved, operation, parameters, kind, symbols, session, now): saved = None
-        fetch = (saved is None) if self.update else (self.refresh or session['is_open'])
+        elif cache_first:
+            try:
+                saved = self._read(operation, parameters, session['session_date'])
+            except CacheMissError:
+                # Mixed watchlists keep their cached members and fetch only misses.
+                return self._members(operation, parameters, kind, session)
+        fetch = (saved is None) if self.update or cache_first else True
         if fetch:
             if self.live is None:
                 self.live = self.stack.enter_context(self.connection(host=self.host, port=self.port))
@@ -151,14 +165,10 @@ class CachedMarketData:
                            'daily', symbols, daily['fetched_at'], daily, batch_id)
             access = dict(source='OpenD', snapshot_id=snapshot_id, fetched_at=fetched_at,
                           batch_id=batch_id, explicit_refresh=self.refresh, market=session)
+            if cache_first and not self.update: access['cache_miss_fetch'] = True
         else:
-            if saved is None: saved = self._read(operation, parameters, session['session_date'])
-            if saved is None:
-                raise CacheMissError(f'盘后数据库没有 {session["session_date"]} 的匹配快照。'
-                                   '默认不会连接 OpenD；请在桌面选择“更新行情”，或使用 --refresh'
-                                   '（MCP: refresh=true）。旧交易日的数据不会冒充最新行情。')
             payload = saved['payload']
-            if not self.update and operation == 'daily_bars' and not parameters.get('cutoff') and not parameters.get('session_date'):
+            if not self.update and operation in ('daily_bars','paper_inputs') and not parameters.get('cutoff') and not parameters.get('session_date'):
                 if any(s.get('as_of', '') < session['session_date'] for s in payload.get('daily_series', [])):
                     raise RuntimeError('数据库日线尚未包含最近完成的交易日，请选择“更新行情”或使用 --refresh。')
             access = dict(source='database', snapshot_id=saved['id'],
@@ -171,6 +181,8 @@ class CachedMarketData:
         access['note'] = ('数据库保存的原始快照；不是当前可成交报价。'
                           + ('采集于盘中，不代表收盘快照。' if original['is_open'] else '')
                           if access['source'] == 'database' else '已抓取 OpenD 并保存原始快照。')
+        if access.get('cache_miss_fetch'):
+            access['note'] = '本地没有匹配快照，已自动抓取 OpenD 并保存；之后相同查询优先读库。'
         if access.get('members'):
             access['note'] += '多股票组合保留各自采集时间，不代表同时报价。'
         if operation == 'basic_info':
@@ -208,6 +220,10 @@ class CachedMarketData:
         OptionQuery.upcoming(symbol, months=months, option_type=option_type, start=start, end=end)
         return self._call('option_chain', dict(symbol=symbol, months=months,
                           option_type=option_type.upper(), start=start, end=end), 'options', [symbol])
+
+    def paper_inputs(self, symbols):
+        symbols=us_symbols(symbols)
+        return self._call('paper_inputs',dict(symbols=symbols),'daily',symbols)
 
     def daily_bars(self, symbols, session_date=None, cutoff=None):
         symbols = us_symbols(symbols)

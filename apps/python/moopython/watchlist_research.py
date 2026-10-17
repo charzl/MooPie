@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from .market_payloads import assemble
 from .research import load_rules
+from .price_signals import dataset_signals
 from .watchlist import run_watchlist
 
 
@@ -21,6 +22,7 @@ def analyze_watchlist_dataset(dataset, configuration=None, top_n=10):
     return dict(action='put', symbol='Watchlist', query_scope='watchlist',
                 symbols=dataset['symbols'], collected_at=dataset['collected_at'], report=report,
                 input_dataset=dataset, data_access=dataset.get('data_access', {}),
+                price_signals=dataset_signals(dataset, report['underlyings']),
                 collection_errors=dataset.get('collection_errors', []))
 
 
@@ -43,6 +45,7 @@ def run_watchlist_research(service, values, action, configuration=None, top_n=10
     if action == 'trend':
         return dict(action='trend', symbol='Watchlist', query_scope='watchlist',
                     symbols=batch['precheck']['valid_symbols'], items=successes, collection_errors=errors,
+                    price_signals={code:signal for item in successes for code,signal in item.get('price_signals', {}).items()},
                     collected_at=max((item['collected_at'] for item in successes), key=datetime.fromisoformat), data_access=access)
     datasets = [item['input_dataset'] for item in successes]
     symbols = [item['symbol'] for item in successes]

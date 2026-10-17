@@ -9,7 +9,7 @@ def underlying(code):
 
 def partition(operation, parameters):
     field = {'collect_put_dataset': 'symbols', 'daily_bars': 'symbols',
-             'snapshots': 'codes', 'basic_info': 'codes'}.get(operation)
+             'snapshots': 'codes', 'basic_info': 'codes', 'paper_inputs':'symbols'}.get(operation)
     return (field, parameters[field]) if field else (None, [])
 
 
@@ -17,7 +17,7 @@ def project(payload, operation, subject):
     result = dict(payload)
     for field in ('symbols', 'codes'):
         if field in result: result[field] = [subject]
-    for field, owner in [('contracts', 'symbol'), ('coverage', 'symbol'), ('daily_series', 'symbol'), ('rows', 'code')]:
+    for field, owner in [('contracts', 'symbol'), ('coverage', 'symbol'), ('daily_series', 'symbol'), ('actions','symbol'), ('rows', 'code')]:
         if field in result:
             result[field] = [row for row in result[field] if row.get(owner) == subject]
     if 'missing_codes' in result:
@@ -40,7 +40,7 @@ def assemble(payloads, operation, parameters):
     result = dict(payloads[0])
     field, subjects = partition(operation, parameters)
     if field in result: result[field] = subjects
-    for key in ('contracts', 'coverage', 'daily_series', 'rows', 'missing_codes', 'missing_quote_codes'):
+    for key in ('contracts', 'coverage', 'daily_series', 'actions', 'rows', 'missing_codes', 'missing_quote_codes'):
         if any(key in value for value in payloads):
             result[key] = [item for value in payloads for item in value.get(key, [])]
     for key in ('calendar_errors', 'collection_notes', 'unassigned_missing_quote_codes'):

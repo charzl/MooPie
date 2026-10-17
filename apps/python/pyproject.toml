@@ -16,6 +16,7 @@ moomoo-mcp = "moopython.market_mcp:main"
 moomoo-research = "moopython.research_cli:main"
 moomoo-db = "moopython.database_cli:main"
 moomoo-watchlist = "moopython.watchlist_cli:main"
+moomoo-paper = "moopython.paper_cli:main"
 
 [project.gui-scripts]
 moomoo-desktop = "moopython.research_ui:main"

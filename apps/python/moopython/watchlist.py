@@ -166,6 +166,8 @@ def run_watchlist(service, values, *, action='both', top_n=10, configuration=Non
                         trend = dict(action='trend', symbol=code,
                                      collected_at=dataset.get('fetched_at', dataset['collected_at']),
                                      trend=trend_report(dataset, code))
+                        from .price_signals import dataset_signals
+                        trend['price_signals'] = item['put'].get('price_signals') or dataset_signals(dataset, {code:trend['trend']})
                         if 'data_access' in dataset: trend['data_access'] = dataset['data_access']
                         item['trend'] = trend
                     else:

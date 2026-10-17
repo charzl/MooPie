@@ -12,13 +12,14 @@ case "${1:-help}" in
   collect   采集合约、报价、日线和财报，保存为 JSON
   db        查看数据库、设置保留天数、清理旧快照
   watchlist 预检查 JSON 股票列表，逐只分析 Put / 走势
+  paper     虚拟股票账户、策略比较和历史重放
   analyze   用独立规则文件分析已保存的 JSON
   mcp       启动只读 MCP stdio 服务，供 agent 宿主调用
   desktop   打开可选桌面界面（先 ./setup.sh --desktop）
 首次安装：./setup.sh
 HELP
     exit 0 ;;
-  doctor|options|collect|analyze|mcp|desktop|db|watchlist) MOOMOO_COMMAND="$1"; shift ;;
+  doctor|options|collect|analyze|mcp|desktop|db|watchlist|paper) MOOMOO_COMMAND="$1"; shift ;;
   *) echo "未知命令：$1。运行 ./moomoo --help 查看用法。" >&2; exit 2 ;;
 esac
 if [ ! -x "$MOOMOO_PYTHON" ]; then
@@ -31,6 +32,7 @@ case "$MOOMOO_COMMAND" in
   collect) exec "$MOOMOO_PYTHON" -m moopython.market_data_cli "$@" ;;
   db) exec "$MOOMOO_PYTHON" -m moopython.database_cli "$@" ;;
   watchlist) exec "$MOOMOO_PYTHON" -m moopython.watchlist_cli "$@" ;;
+  paper) exec "$MOOMOO_PYTHON" -m moopython.paper_cli "$@" ;;
   analyze) exec "$MOOMOO_PYTHON" "$MOOMOO_ROOT/modules/put-screener/put_rules.py" "$@" ;;
   mcp) exec "$MOOMOO_PYTHON" -m moopython.market_mcp "$@" ;;
   desktop)

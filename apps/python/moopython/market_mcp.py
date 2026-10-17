@@ -45,8 +45,8 @@ def register_tools(server, reader, annotations=None):
         """Fetch current US stock/option snapshots (1–200 codes), including bid/ask and option Greeks.
 
         Broker snapshot timestamps do not guarantee a fresh executable bid. Missing
-        codes are explicit. After hours reads SQLite only; refresh=true explicitly
-        fetches OpenD. data_access reports source and original collection time.
+        codes are explicit. After hours prefers SQLite and automatically fetches
+        missing snapshots; refresh=true forces OpenD. data_access reports source and time.
         """
         return reader('snapshots', codes=codes, refresh=refresh)
 
@@ -59,7 +59,7 @@ def register_tools(server, reader, annotations=None):
         Dates are YYYY-MM-DD, future expirations only. Prefer short explicit date
         windows to bound output size. months=1–24; option_type=PUT/CALL/ALL.
         This contract table contains no executable option quote; fetch snapshots next.
-        After hours reads SQLite; refresh=true explicitly fetches and saves OpenD.
+        After hours prefers SQLite, fetching missing data; refresh=true forces OpenD.
         """
         return reader('option_chain', symbol=symbol, months=months, option_type=option_type, start=start, end=end, refresh=refresh)
 
@@ -72,7 +72,7 @@ def register_tools(server, reader, annotations=None):
         cutoff is an optional timezone-aware ISO timestamp for historical research.
         Unfinished daily bars are excluded; gaps and provider errors stay visible.
         No RSI, trend judgment or strategy ranking is calculated here.
-        After hours reads SQLite; refresh=true explicitly fetches and saves OpenD.
+        After hours prefers SQLite, fetching missing data; refresh=true forces OpenD.
         """
         return reader('daily_bars', symbols=symbols, session_date=session_date, cutoff=cutoff, refresh=refresh)
 
@@ -81,7 +81,7 @@ def register_tools(server, reader, annotations=None):
         """Fetch US provider earnings listings across 1–7 calendar days (YYYY-MM-DD).
 
         An absent listing means unknown; it never establishes earnings clearance.
-        After hours reads SQLite; refresh=true explicitly fetches and saves OpenD.
+        After hours prefers SQLite, fetching missing data; refresh=true forces OpenD.
         """
         return reader('earnings_calendar', start=start, end=end, refresh=refresh)
     return server

@@ -14,6 +14,7 @@
 | `db` | `status`、`schema`、`watchlist`、`import-watchlist PATH`、`export-watchlist PATH`、`search QUERY [--limit N]`、`sync-symbols [--port N]`、`retention --days N`、`cleanup --older-than-days N [--dry-run]`、`vacuum` | 状态 / 本地股票候选 / 同步 / 清理 JSON；`schema` 输出 SQL；`sync-symbols` 和显式导入验证可连接 OpenD |
 | `watchlist [LIST.json]` | `--check-only`、`--action both\|put\|trend`、`--top 5\|10\|20`、`--rank-by`、`--config`、`--refresh`、`--port`、`--output` | 默认读 SQLite；可选 JSON 临时输入；全名单预检查及逐股研究 JSON |
 | `desktop` | `--classic`（可选旧面板） | 桌面窗口；需安装 desktop extra |
+| `paper` | `strategies`、`list`、`create`、`backtest`、`update ID`、`report ID`、`watch ID` | 本地股票模拟实验与JSON报告；详见[模拟盘](../guides/paper-trading.md) |
 
 `options` 的月份范围1–24，默认3；到期日 start/end 为 `YYYY-MM-DD`，区间包含 end，支持 US 和 HK。它返回合约信息，不返回完整报价研究数据。`collect` / MCP / Put 研究当前支持 US；完整采集最多20只股票。
 
@@ -24,6 +25,8 @@
 ## 单股票 / Watchlist 研究入口
 
 输入股票代码时查询单股；省略代码时查询 SQLite Watchlist，`--watchlist PATH` 可只读本次 JSON 名单并合并排名。`add SYMBOL [--refresh]` 核验后写入 SQLite，不接受 `--watchlist`；JSON 导入使用 `db import-watchlist`。合并排名的 `--input` 使用原始多股票 dataset 离线重算；单股的 `--input` 仍要求输入仅包含请求股票。股票代码和 `--watchlist` 不能同时指定。
+
+桌面普通查询使用研究 CLI `--saved`：包括盘中在内都读取最近已保存的收盘报告；已有股票不自动刷新，无任何历史记录的单股首次手动查询仍会自动抓取。可用 `python -m moopython.research_cli put --saved --top 10` 查看全名单保存结果。`--saved` 与 `--input` / `--refresh` / `--update` 互斥；主动更新仍用 `--update`。结果的 `saved_view` 保留展示交易日、最近完成交易日及是否直接复用了预计算报告。
 
 名单管理：`db watchlist` 查看成员；`db import-watchlist FILE.json [--replace] [--refresh] [--port N]` 验证后合并，replace 为替换；`db export-watchlist FILE.json` 导出备份。空 JSON 在导入时表示空集合，replace 可明确清空；默认合并不删除既有成员。只有显式导入验证刷新可能连接 OpenD，查看与导出始终本地。
 
@@ -42,7 +45,7 @@ apps/python/.venv/bin/python -m moopython.research_cli put AVGO \
   --input artifacts/put-screen/input.json --config artifacts/put-screen/filters.json --top 20
 ```
 
-支持 `--port`、`--output`、`--config`、`--top 5|10|20`、`--input` 和 `--refresh`。`collect` 与研究入口默认盘中抓取保存、盘后只读 SQLite；无匹配快照时明确报错，`--refresh` 主动连接 OpenD，包括盘后。数据库位置可用 `MOOMOO_DB_PATH` 设置，见[数据库说明](../guides/database.md)。`--input` 仅用于 Put，不能与 `--refresh` 同用，要求原始 dataset；研究 CLI 结果先提取 `input_dataset`，桌面导出先提取 `put.input_dataset`，不能把整个包装结果作为输入。单股模式校验输入只有请求的一只股票；省略股票代码时支持多股票输入的全名单排名。
+支持 `--port`、`--output`、`--config`、`--top 5|10|20`、`--input` 和 `--refresh`。`collect` 与研究入口默认盘中抓取保存、盘后优先读SQLite；缺少匹配快照自动抓取并保存，批量请求只补缺少成员。获取失败明确报错，已有匹配缓存的股票不重抓；`--refresh` 强制重抓，包括盘后。数据库位置可用 `MOOMOO_DB_PATH` 设置，见[数据库说明](../guides/database.md)。`--input` 仅用于 Put，不能与 `--refresh` 同用，要求原始 dataset；研究 CLI 结果先提取 `input_dataset`，桌面导出先提取 `put.input_dataset`，不能把整个包装结果作为输入。单股模式校验输入只有请求的一只股票；省略股票代码时支持多股票输入的全名单排名。
 
 成功时写 UTF-8 JSON 到 output，未指定 output 则写 stdout；SDK 日志走 stderr。**指定 output 前先创建父目录**；`options --output` 同样要求目录存在。`collect` 与独立引擎会创建其输出父目录。
 
@@ -65,6 +68,7 @@ apps/python/.venv/bin/python -m moopython.research_cli put AVGO \
 | `watchlist` | 1；运行 / 分析错误；2；预检查失败（JSON） | 2；argparse stderr |
 | `analyze` | 2；stderr 文本 | 2；argparse stderr |
 | `research_cli` | 1；`{"error":"..."}` 写入所选 JSON 通道 | 2；argparse stderr，不能假定存在 JSON |
+| `paper` | 1；`{"error":"..."}` 写入所选 JSON 通道；watch错误后按间隔重试 | 2；argparse stderr |
 | `mcp` | 工具错误按 MCP 协议返回 | 启动参数无效或缺 MCP 依赖为2 |
 
 成功的短命令退出码为0。MCP 是长运行服务；宿主应检查协议结果。不要给 doctor、collect 或 analyze 添加不存在的 `--output json` 参数；其中 output 表示文件路径或根本不支持。

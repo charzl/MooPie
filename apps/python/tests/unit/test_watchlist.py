@@ -193,13 +193,13 @@ class WatchlistCliTests(unittest.TestCase):
             self.assertEqual(item['put']['report']['top_n_requested'], 20)
             self.assertEqual(item['put']['report']['sort_order'][0], ['risk_score', 'asc'])
 
-    def test_empty_after_hours_cache_is_unverified_and_does_not_call_provider(self):
+    def test_empty_after_hours_cache_automatically_verifies_new_symbols(self):
         with patch('moopython.watchlist_cli.market_data_connection', self.cached), redirect_stdout(io.StringIO()) as stream:
-            self.assertEqual(main([str(self.list_file), '--check-only']), 2)
+            self.assertEqual(main([str(self.list_file), '--check-only']), 0)
         result = json.loads(stream.getvalue())
-        self.assertEqual(result['summary']['unverified_count'], 2)
+        self.assertEqual(result['summary']['unverified_count'], 0)
         self.assertEqual(result['summary']['invalid_count'], 0)
-        self.assertFalse(self.provider.calls)
+        self.assertTrue(self.provider.calls)
 
     def test_file_errors_precede_connection_and_json_stdout_has_no_logs(self):
         self.list_file.write_text('{bad json', encoding='utf-8')
@@ -217,10 +217,10 @@ class WatchlistCliTests(unittest.TestCase):
     def test_uncached_member_does_not_hide_existing_verification_evidence(self):
         with self.cached(refresh=True) as service: service.basic_info(['AAA'])
         with self.cached() as service: check = precheck(service, ['AAA', 'BBB'])
-        self.assertFalse(check['passed'])
-        self.assertEqual(check['valid_symbols'], ['US.AAA'])
-        self.assertEqual([row['symbol'] for row in check['unverified']], ['US.BBB'])
-        self.assertEqual(len(self.provider.calls), 1)
+        self.assertTrue(check['passed'])
+        self.assertEqual(check['valid_symbols'], ['US.AAA','US.BBB'])
+        self.assertEqual(check['unverified'], [])
+        self.assertEqual(len(self.provider.calls), 2)
 
 
 if __name__ == '__main__': unittest.main()
