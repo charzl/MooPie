@@ -1,10 +1,10 @@
 """Editable, standalone cash-secured PUT research rules. Python standard library only.
 
-Edit RULES / SORT_ORDER below, increase RULESET_VERSION, and rerun the same input.
+Edit TREND_RULES / RULES / SORT_ORDER below, increase RULESET_VERSION, and rerun.
 No broker, Qt, other rule-engine package, model, or order API is imported here.
 """
 import argparse
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 import hashlib
 import json
 import math
@@ -14,8 +14,17 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.1.0'
-RULESET_VERSION = '1.0.0'
+ENGINE_VERSION = '0.2.0'
+RULESET_VERSION = '1.1.0'
+# Initial research thresholds, not calibrated probabilities or backtested signals.
+# All must pass BEFORE comparing put premiums. Oversold alone is not a buy signal.
+TREND_RULES = [
+    ('above-ma50', 'distance_to_ma50_pct', '>=', 0),
+    ('ma50-not-falling', 'ma50_slope_5d_pct', '>=', 0),
+    ('no-20d-breakdown', 'breakdown_20d', '==', 0),
+    ('rsi-floor', 'rsi14', '>=', 40),
+    ('momentum-not-deteriorating', 'macd_histogram_change', '>=', 0),
+]
 RULES = [
     ('standard-contract', 'standard_contract', '==', 1),
     ('not-suspended', 'not_suspended', '==', 1),
@@ -32,6 +41,7 @@ RULES = [
     ('spread', 'spread_pct_of_mid', '<=', 15),
     ('earnings-checked', 'earnings_known', '==', 1),
     ('earnings-buffer', 'days_expiry_before_earnings', '>=', 3),
+    ('underlying-trend', 'trend_allowed', '==', 1),
 ]
 # Among contracts passing EVERY rule, maximize simple annualized gross premium
 # on full strike cash collateral; ties favor tighter spreads / lower delta.
@@ -45,7 +55,10 @@ METRICS = frozenset(('bid', 'ask', 'shares', 'strike', 'underlying_price', 'days
     'breakeven_before_costs', 'breakeven_buffer_pct', 'premium_per_contract_before_costs',
     'cash_collateral', 'gross_return_pct', 'annualized_gross_return_pct', 'max_profit_before_costs',
     'max_loss_before_costs', 'pnl_at_spot_minus_20_pct', 'standard_contract', 'not_suspended',
-    'same_session_snapshot', 'snapshot_age_seconds', 'earnings_known', 'days_expiry_before_earnings'))
+    'same_session_snapshot', 'snapshot_age_seconds', 'earnings_known', 'days_expiry_before_earnings',
+    'trend_allowed', 'strike_below_20d_low_atr'))
+TREND_METRICS = frozenset(('distance_to_ma50_pct', 'ma50_slope_5d_pct', 'breakdown_20d',
+                          'rsi14', 'macd_histogram_change'))
 EARNINGS_RULES = frozenset(('earnings-checked', 'earnings-buffer'))
 
 
@@ -72,6 +85,95 @@ def timestamp(value, assume_market_timezone=False):
             raise ValueError('Collection timestamp must include a timezone')
         result = result.replace(tzinfo=NY)
     return result
+
+
+def ema(values, period):
+    """SMA seed; return (original index, EMA) pairs, never read future values."""
+    seed = sum(values[:period]) / period
+    result = [(period - 1, seed)]
+    for index in range(period, len(values)):
+        seed += 2 / (period + 1) * (values[index] - seed)
+        result.append((index, seed))
+    return result
+
+
+def wilder(values, period=14):
+    value = sum(values[:period]) / period
+    for item in values[period:]: value = (value * (period - 1) + item) / period
+    return value
+
+
+def trend(series, session_date, collected_at):
+    """One completed regular-session QFQ series -> auditable trend evidence."""
+    if not isinstance(series, dict): raise ValueError('Missing daily history')
+    if series.get('error'): raise ValueError('Daily history collection failed: ' + str(series['error']))
+    if (series.get('interval'), series.get('adjustment'), series.get('session')) != ('1d', 'qfq', 'regular'):
+        raise ValueError('Require regular-session QFQ daily bars')
+    as_of = iso_date(series.get('as_of'))
+    if not 0 <= (session_date - as_of).days <= 7:
+        raise ValueError('Daily history is stale or beyond quote session')
+    available = timestamp(series.get('available_at')).astimezone(timezone.utc)
+    if available > collected_at or available.astimezone(NY).date() != as_of:
+        raise ValueError('Daily bar was not finalized at quote collection time')
+    kind = series.get('trade_date_type')
+    if kind not in ('WHOLE', 'MORNING', 'AFTERNOON'): raise ValueError('Unknown daily session close')
+    close_time = time(13, 5) if kind == 'MORNING' else time(16, 5)
+    if available.astimezone(NY).time() < close_time:
+        raise ValueError('Daily bar available before session finalization')
+    local = collected_at.astimezone(NY)
+    if (local.date() > session_date or local.date() == session_date and local.time() >= time(16, 5)) and as_of != session_date:
+        raise ValueError('Daily history does not include the completed quote session')
+    dates = series.get('calendar_dates')
+    bars = series.get('bars')
+    if not isinstance(dates, list) or not isinstance(bars, list) or len(bars) < 205:
+        raise ValueError('Need at least 205 completed daily bars and trading calendar')
+    parsed = [iso_date(day) for day in dates]
+    if parsed != sorted(set(parsed)) or parsed[-1] != as_of:
+        raise ValueError('Invalid or stale trading calendar')
+    bar_dates = [bar.get('date') for bar in bars]
+    if bar_dates != dates: raise ValueError('Daily history has gaps, duplicates or unordered / future bars')
+    for bar in bars:
+        if bar.get('complete') is not True: raise ValueError('Incomplete daily bar')
+        o, h, l, c, v = [finite(bar.get(key), key) for key in ('open', 'high', 'low', 'close', 'volume')]
+        if min(o, h, l, c) <= 0 or v < 0 or not l <= min(o, c) <= max(o, c) <= h:
+            raise ValueError('Invalid daily OHLCV')
+    close = [bar['close'] for bar in bars]
+    last = close[-1]
+    def ma(period, offset=0):
+        end = len(close) - offset
+        return sum(close[end-period:end]) / period
+    changes = [b-a for a, b in zip(close, close[1:])]
+    gain = wilder([max(x, 0) for x in changes])
+    loss = wilder([max(-x, 0) for x in changes])
+    rsi = 50 if gain == loss == 0 else 100 if loss == 0 else 100 - 100 / (1 + gain/loss)
+    fast, slow = dict(ema(close, 12)), dict(ema(close, 26))
+    macd = [fast[i] - value for i, value in slow.items()]
+    signal = ema(macd, 9)
+    hist = [macd[i] - value for i, value in signal]
+    tr = [max(bar['high']-bar['low'], abs(bar['high']-previous), abs(bar['low']-previous))
+          for previous, bar in zip(close, bars[1:])]
+    atr = wilder(tr)
+    low20 = min(bar['low'] for bar in bars[-21:-1])
+    previous_volume = sum(bar['volume'] for bar in bars[-21:-1]) / 20
+    values = dict(close=last, ma20=ma(20), ma50=ma(50), ma200=ma(200),
+        ma20_slope_5d_pct=100*(ma(20)/ma(20, 5)-1),
+        ma50_slope_5d_pct=100*(ma(50)/ma(50, 5)-1),
+        distance_to_ma50_pct=100*(last/ma(50)-1), rsi14=rsi,
+        macd=macd[-1], macd_signal=signal[-1][1], macd_histogram=hist[-1],
+        macd_histogram_change=round(hist[-1]-hist[-2], 12), atr14=atr,
+        prior_20d_low=low20, prior_60d_low=min(bar['low'] for bar in bars[-61:-1]),
+        breakdown_20d=int(last < low20),
+        lower_highs_and_lows_5d=int(max(b['high'] for b in bars[-5:]) < max(b['high'] for b in bars[-10:-5])
+                                  and min(b['low'] for b in bars[-5:]) < min(b['low'] for b in bars[-10:-5])),
+        volume_ratio_20d=bars[-1]['volume']/previous_volume if previous_volume else None)
+    evidence = [dict(id=rid, metric=key, actual=values[key], op=op, threshold=threshold,
+                     passed=OPS[op](values[key], threshold)) for rid, key, op, threshold in TREND_RULES]
+    failed = [r['id'] for r in evidence if not r['passed']]
+    state = ('downtrend' if last < values['ma50'] and values['ma50_slope_5d_pct'] < 0
+             else 'uptrend' if not failed else 'mixed_or_weakening')
+    return dict(symbol=series['symbol'], status='ok', as_of=as_of.isoformat(),
+                available_at=series['available_at'], bar_count=len(bars), state=state,
+                allowed=not failed, metrics=values, rules=evidence, failed_rules=failed)
 
 
 def metrics(row, session_date, collected_at):
@@ -147,6 +249,13 @@ def validate_rules():
         finite(threshold, 'Rule threshold')
         if metric not in METRICS: raise ValueError('Unknown rule metric: ' + str(metric))
     if not RULES: raise ValueError('At least one rule is required')
+    trend_ids = set()
+    if not TREND_RULES: raise ValueError('At least one trend rule is required')
+    for rid, metric, op, threshold in TREND_RULES:
+        if rid in trend_ids or op not in OPS or metric not in TREND_METRICS:
+            raise ValueError('Invalid or duplicate trend rule')
+        trend_ids.add(rid)
+        finite(threshold, 'Trend threshold')
     for metric, direction in SORT_ORDER:
         if metric not in METRICS: raise ValueError('Unknown sort metric: ' + str(metric))
         if direction not in ('asc', 'desc'): raise ValueError('Invalid sort direction')
@@ -167,11 +276,30 @@ def scan(dataset, budget=None):
     codes = [row.get('code') if isinstance(row, dict) else None for row in rows]
     if any(not isinstance(code, str) for code in codes) or len(set(codes)) != len(codes):
         raise ValueError('Missing or duplicate contract codes')
+    daily = dataset.get('daily_series', [])
+    if not isinstance(daily, list): raise ValueError('daily_series must be a list')
+    histories = {}
+    for series in daily:
+        if not isinstance(series, dict) or not isinstance(series.get('symbol'), str):
+            raise ValueError('Daily series must identify its underlying symbol')
+        if series['symbol'] in histories: raise ValueError('Duplicate daily series')
+        histories[series['symbol']] = series
+    trends = {}
+    for symbol in sorted({r.get('symbol') for r in rows if isinstance(r, dict) and isinstance(r.get('symbol'), str)}):
+        try:
+            trends[symbol] = trend(histories.get(symbol), session, collected)
+        except (ValueError, TypeError, KeyError, OverflowError, IndexError) as error:
+            trends[symbol] = dict(symbol=symbol, status='invalid_data', allowed=False, error=str(error))
     results = []
     for row in rows:
         base = dict(code=row['code'], symbol=row.get('symbol'), expiration=row.get('expiration'))
         try:
             values = metrics(row, session, collected)
+            underlying = trends[row['symbol']]
+            values['trend_allowed'] = int(underlying['allowed'])
+            tm = underlying.get('metrics', {})
+            values['strike_below_20d_low_atr'] = ((tm['prior_20d_low'] - values['strike']) / tm['atr14']
+                                                if tm.get('atr14', 0) > 0 else None)
             evidence = []
             for rule_id, metric, op, threshold in RULES:
                 if metric not in values: raise ValueError('Unknown rule metric: ' + metric)
@@ -185,6 +313,7 @@ def scan(dataset, budget=None):
             eligible = all(rule['passed'] for rule in evidence)
             results.append(dict(base, status='ok', eligible=eligible, metrics=values,
                                 rules=evidence, failed_rules=[r['id'] for r in evidence if not r['passed']],
+                                trend_symbol=row['symbol'],
                                 market_state=row.get('market_state', 'UNKNOWN'),
                                 snapshot_update_time=row['snapshot_update_time'], earnings=row.get('earnings'),
                                 live_review_ready=bool(eligible and row.get('market_state') in ('MORNING', 'AFTERNOON')
@@ -207,11 +336,11 @@ def scan(dataset, budget=None):
         session_date=session.isoformat(), collected_at=dataset['collected_at'],
         engine_version=ENGINE_VERSION, ruleset_version=RULESET_VERSION,
         engine_file_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        rules_sha256=fingerprint(dict(rules=RULES, sort=SORT_ORDER)), dataset_sha256=fingerprint(dataset),
+        rules_sha256=fingerprint(dict(rules=RULES, trend_rules=TREND_RULES, sort=SORT_ORDER)), dataset_sha256=fingerprint(dataset),
         assumption='One standard US equity/ETF put, fully cash secured, willing to accept shares; user suitability not established',
         cash_budget=budget, budget_checked=budget is not None,
         ranking_objective='Pass every hard rule, then sort lexicographically by sort_order; not an expected-return prediction',
-        sort_order=SORT_ORDER, rules=RULES, total_contracts=len(rows),
+        sort_order=SORT_ORDER, rules=RULES, trend_rules=TREND_RULES, underlyings=trends, total_contracts=len(rows),
         missing_quote_codes=dataset.get('missing_quote_codes', []),
         calendar_errors=dataset.get('calendar_errors', []),
         qualified_count=len(ranked), best_research_code=ranked[0]['code'] if ranked else None,
@@ -220,6 +349,7 @@ def scan(dataset, budget=None):
         best_watchlist_code=watchlist[0]['code'] if watchlist else None,
         limitations=[
             'Rule-selected research candidates; thresholds have not been backtested or validated.',
+            'Daily trend indicators describe completed history; they do not estimate the probability of a future decline.',
             'Bid-based estimates are not fill guarantees. All returns and P/L exclude fees, slippage, taxes and cash interest.',
             'Simple annualization is a comparison scale, not a forecast or compounded return.',
             'Delta is price sensitivity, not an exact assignment or profit probability.',
@@ -260,6 +390,13 @@ def main(argv=None):
                                              blocked_rules=','.join(row['failed_rules'])))
         print(f'{report["qualified_count"]} / {report["total_contracts"]} contracts pass every rule; session {report["session_date"]}')
         print('Research ranking; gross estimates before costs. Refresh quotes and confirm earnings before any trade.')
+        for symbol, underlying in report['underlyings'].items():
+            if underlying['status'] == 'ok':
+                m = underlying['metrics']
+                print(f'{symbol} trend={underlying["state"]} as_of={underlying["as_of"]} '
+                      f'close={m["close"]:.2f} MA50={m["ma50"]:.2f} RSI14={m["rsi14"]:.1f} '
+                      f'allowed={underlying["allowed"]} failed={",".join(underlying["failed_rules"])}')
+            else: print(f'{symbol} trend blocked: {underlying["error"]}')
         for row in report['ranked'][:args.top]:
             m = row['metrics']
             print(f'{row["rank"]:2} {row["code"]:27} bid={m["bid"]:.2f} DTE={m["days_to_expiry"]:2} '

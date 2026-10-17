@@ -1,7 +1,7 @@
 """Collect broker snapshots as JSON; ranking rules live in put_rules.py."""
 import argparse
 from contextlib import redirect_stdout
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as day_time, timedelta, timezone
 import json
 import math
 from pathlib import Path
@@ -22,6 +22,58 @@ def clean(value):
     if isinstance(value, list): return [clean(v) for v in value]
     if isinstance(value, float) and not math.isfinite(value): return None
     return value
+
+
+def completed_session(days, now):
+    """Use the US calendar, including half days; allow five minutes to finalize."""
+    local = now.astimezone(ZoneInfo('America/New_York'))
+    completed = []
+    for row in days:
+        day = date.fromisoformat(row['time'])
+        kind = row.get('trade_date_type')
+        close = day_time(13, 5) if kind == 'MORNING' else day_time(16, 5)
+        if day < local.date() or day == local.date() and kind in ('WHOLE', 'MORNING', 'AFTERNOON') and local.time() >= close:
+            completed.append(day)
+    if not completed: raise ValueError('No completed US trading session in calendar')
+    return max(completed)
+
+
+def collect_daily_series(sdk, context, symbols, session_date, now=None):
+    now = now or datetime.now(timezone.utc)
+    quote_day = date.fromisoformat(session_date)
+    start = quote_day - timedelta(days=550)
+    ret, days = context.request_trading_days(sdk.Market.US, start=start.isoformat(), end=session_date)
+    if ret != sdk.RET_OK: raise RuntimeError(str(days))
+    as_of = completed_session(days, now).isoformat()
+    kind = next(row['trade_date_type'] for row in days if row['time'] == as_of)
+    close = day_time(13, 5) if kind == 'MORNING' else day_time(16, 5)
+    available = datetime.combine(date.fromisoformat(as_of), close, tzinfo=ZoneInfo('America/New_York')).isoformat()
+    expected = sorted({row['time'] for row in days if row['time'] <= as_of})
+    series = []
+    for code in symbols:
+        print(f'Collecting completed QFQ daily bars: {code}, through {as_of}', file=sys.stderr)
+        try:
+            rows, page, seen = [], None, set()
+            while True:
+                ret, frame, next_page = context.request_history_kline(
+                    code, start=start.isoformat(), end=as_of, ktype=sdk.KLType.K_DAY,
+                    autype=sdk.AuType.QFQ, max_count=1000, page_req_key=page,
+                    extended_time=False, session=sdk.Session.RTH)
+                if ret != sdk.RET_OK: raise RuntimeError(str(frame))
+                for row in frame.to_dict('records'):
+                    day = row['time_key'][:10]
+                    if day > as_of: raise ValueError('History response contains an incomplete / future bar')
+                    rows.append(dict(date=day, **{key:row[key] for key in ('open','high','low','close','volume')}, complete=True))
+                if not next_page: break
+                if next_page in seen: raise ValueError('Repeated history pagination key')
+                seen.add(next_page); page = next_page
+            series.append(dict(symbol=code, source='moomoo OpenD request_history_kline',
+                interval='1d', adjustment='qfq', session='regular', as_of=as_of,
+                available_at=available, trade_date_type=kind,
+                calendar_dates=expected, bars=rows))
+        except Exception as error:
+            series.append(dict(symbol=code, as_of=as_of, error=str(error)))
+    return dict(trend_as_of=as_of, trend_collected_at=now.isoformat(), daily_series=clean(series))
 
 
 def collect(sdk, context, symbols, months=3):
@@ -105,7 +157,7 @@ def collect(sdk, context, symbols, months=3):
             earnings=next_earnings[0] if next_earnings else None,
             earnings_calendar_complete=not calendar_errors,
         ))
-    return clean(dict(
+    result = clean(dict(
         schema=1, source='moomoo OpenD', collected_at=datetime.now(timezone.utc).isoformat(),
         session_date=session_date, timezone='America/New_York', symbols=symbols, coverage=coverage,
         contracts=normalized, missing_quote_codes=missing_quotes, calendar_errors=calendar_errors,
@@ -114,11 +166,14 @@ def collect(sdk, context, symbols, months=3):
             'snapshot_update_time is the broker snapshot timestamp, not a guaranteed bid timestamp.',
             'Earnings dates are provider listings and may be estimated or change.',
         ]))
+    result.update(collect_daily_series(sdk, context, symbols, session_date))
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description='Collect US put chains, bid/ask, Greeks and earnings as JSON')
-    parser.add_argument('symbols', nargs='+')
+    parser.add_argument('symbols', nargs='*')
+    parser.add_argument('--enrich', type=Path, help='Add completed daily bars to an existing snapshot JSON; preserve quote collection time')
     parser.add_argument('--months', type=int, default=3)
     parser.add_argument('--port', type=int, default=11111)
     parser.add_argument('--output', type=Path, required=True)
@@ -129,7 +184,13 @@ def main():
             import moomoo as sdk
             signal.signal(signal.SIGINT, signal.default_int_handler)
             context = sdk.OpenQuoteContext(host='127.0.0.1', port=args.port)
-            try: dataset = collect(sdk, context, args.symbols, args.months)
+            try:
+                if args.enrich:
+                    dataset = json.loads(args.enrich.read_text())
+                    dataset.update(collect_daily_series(sdk, context, dataset['symbols'], dataset['session_date'],
+                                                       now=datetime.fromisoformat(dataset['collected_at'])))
+                else:
+                    dataset = collect(sdk, context, args.symbols, args.months)
             finally: context.close()
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(dataset, ensure_ascii=False, allow_nan=False, indent=2) + '\n')

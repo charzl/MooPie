@@ -2,7 +2,7 @@
 
 规则、阈值、计算、排序和 JSON/CSV 输出都在 **`put_rules.py`**。这是单个独立 Python 文件，只依赖标准库，直接复制它即可运行；无需安装 Qt、moomoo SDK 或 `modules/rule-engine`。开发和 CI 使用 Python 3.14。
 
-后续修改时，编辑文件顶部的 `RULES`、`SORT_ORDER`，提高 `RULESET_VERSION`，然后对相同输入重新运行。新增计算指标时，在同一个文件的 `metrics()` 和 `METRICS` 中添加。所有规则都是硬条件，不能通过其他指标的高分抵消。报告记录规则指纹、整个引擎文件指纹和输入数据指纹，便于比较不同版本。
+后续修改时，编辑文件顶部的 `TREND_RULES`、`RULES`、`SORT_ORDER`，提高 `RULESET_VERSION`，然后对相同输入重新运行。新增计算指标时，在同一个文件的 `metrics()` 和 `METRICS` 中添加。所有规则都是硬条件，不能通过其他指标的高分抵消。报告记录规则指纹、整个引擎文件指纹和输入数据指纹，便于比较不同版本。
 
 ## 采集与运行
 
@@ -21,11 +21,38 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
   --budget 25000 --output artifacts/put-screen/budget-ranking.json
 ```
 
-`scripts/collect-put-data.py` 只采集数据，不排序：查询未来三个月全部挂牌 Put，补充 Bid/Ask、Delta、IV、成交量、未平仓量和财报日历。支持 `--months` 和 `--port`。当前筛选器只支持美元计价的标准美股/ETF Put，读取 SDK 报价，不查询账户或执行订单。缺失报价在 `missing_quote_codes` 中列出；财报日历失败在 `calendar_errors` 中列出，不填造数据。
+`scripts/collect-put-data.py` 只采集数据，不排序：查询未来三个月全部挂牌 Put，补充 Bid/Ask、Delta、IV、成交量、未平仓量、财报日历和约 550 个自然日内的复权日线。支持 `--months` 和 `--port`。当前筛选器只支持美元计价的标准美股/ETF Put，读取 SDK 报价，不查询账户或执行订单。缺失报价在 `missing_quote_codes` 中列出；财报日历失败在 `calendar_errors` 中列出，不填造数据。
 
 把上面的 `input.json` 交给规则文件即可独立重跑，修改规则无需再次联网，也无需重新打包客户端。单独复制引擎文件时，输入字段参考 `example.json`；该示例完全是合成数据。
 
-## 初版条件与排序
+## 股票趋势先筛选
+
+先计算每个股票的日线趋势，再筛选其 Put。默认五个硬条件定义在独立文件顶部的 `TREND_RULES`，只是待验证的初始研究假设，不是经过回测的收益优势：
+
+| 条件 | 初始阈值 |
+| --- | --- |
+| 相对位置 | 收盘价 ≥ MA50 |
+| 均线方向 | MA50 相对 5 个交易日前的变化 ≥0 |
+| 破位 | 收盘价不低于此前 20 根日线的最低价（不包含当日） |
+| 动量水平 | Wilder RSI14 ≥40 |
+| 动量变化 | MACD(12,26,9) 柱值不比前一天恶化 |
+
+同时输出 MA20/50/200、MA20 斜率、ATR14、此前 20/60 日低点、最近两个不重叠五日窗口的高低点变化、当日成交量 / 此前 20 日均量。`strike_below_20d_low_atr` 是 `(此前20日低点−行权价)/ATR14`，仅供参考，不是支撑位必然有效的假设，也不参与默认排序。成交量和 MA200 目前只提供证据，未额外设硬门槛。
+
+MA 使用简单平均；EMA 使用 SMA 初值；RSI 和 ATR 使用 Wilder 平滑。浮点误差范围内的 MACD 柱变化取 12 位小数。不同软件因初始化、复权和数据长度，结果可能略有差异。RSI 超卖不能独立证明止跌；趋势通过也不代表未来不会下跌，不输出未经校准的下跌概率。
+
+采集只使用常规时段、前复权、已完成日线；按美股交易日历处理周末、假期和半日市，收盘后留 5 分钟。至少需要 205 根日线；缺失、重复、未完成、非复权或时点不一致的数据会阻止该股票的所有候选。盘中只能使用上一已完成交易日；报价采集时间之前尚未收盘的日线不可用于该次分析。`underlyings` 保存每个股票的指标、规则和失败原因，合约只关联其股票，避免重复保存指标证据。
+
+已有报价文件可单独补日线，保留原报价采集时间并以该时间为可用数据截止点：
+
+```sh
+apps/python/.venv/bin/python scripts/collect-put-data.py \
+  --enrich artifacts/put-screen/input.json --output artifacts/put-screen/trend-input.json
+```
+
+指标参考：[Fidelity MACD](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/macd)、[Fidelity RSI](https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/RSI)、[Schwab 技术指标误区](https://www.schwab.com/learn/story/technical-indicators-3-trading-traps-to-avoid)。这些资料解释指标含义，不为本项目的阈值或组合提供回测证明。
+
+## 合约条件与排序
 
 假设为现金担保卖 Put，并愿意接受指派后持股。尚未确认个人适合程度、估值和组合集中度。
 
@@ -40,6 +67,7 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
 | 流动性 | 未平仓量 ≥200、当日成交量 ≥10 |
 | 价差 | `(Ask−Bid)÷((Ask+Bid)/2) ≤15%` |
 | 财报 | 数据源列出下一次财报，且合约至少提前 3 个自然日到期 |
+| 股票趋势 | 必须通过上述全部趋势条件；缺少日线时不放行 |
 | 预算 | 可选：行权价×100 不超过传入预算；未提供时明确标记未检查 |
 
 通过所有条件后，按 `Bid÷行权价×365÷剩余天数` 从高到低排序；并列时优先较小的相对价差、较低的绝对 Delta，最后按合约代码固定顺序。这是满足阈值后的简单年化毛权利金比较，未做回测，不代表最优策略、预期收益或可重复年化收益。
@@ -58,7 +86,7 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
 
 ## 合格与待确认名单
 
-`ranked` 只包含所有条件通过的合约。财报未知时，合约保持 `eligible=false`；如果其余报价和风险规则全部通过，则单独进入 `earnings_unverified_watchlist`。已知财报会跨越合约期限的合约不会进入该名单。CSV 通过 `category` 明确区分这两种结果。
+`ranked` 只包含所有条件通过的合约。财报未知时，合约保持 `eligible=false`；如果其余趋势、报价和风险规则全部通过，则单独进入 `earnings_unverified_watchlist`。已知财报会跨越合约期限的合约不会进入该名单。CSV 通过 `category` 明确区分这两种结果。
 
 财报来自 moomoo 日历，不表示发行人已经确认。未列出日期属于未知，不能推断无财报；即使日历列出日期，交易前仍应核对最新公告。当前采集结果若在收盘后获取，排序仅用于研究；`live_review_ready` 只有在常规市场开放且快照时间未超过 15 分钟时才可能为 true。快照更新时间也不能保证 Bid 的真实时效，该标志不表示可以自动下单。
 
@@ -74,4 +102,4 @@ python3.14 -I modules/put-screener/put_rules.py modules/put-screener/example.jso
   --output /tmp/synthetic-put-report.json
 ```
 
-测试覆盖 Bid 估值、现金与损失公式、排序和并列、预算边界、硬规则、未知/跨期财报、过期/倒挂/陈旧报价、数据身份、规则指纹和隔离环境中的单文件执行。CI 使用合成数据，不登录 OpenD，不保存真实报价。
+测试覆盖 Bid 估值、现金与损失公式、排序和并列、预算边界、硬规则、未知/跨期财报、过期/倒挂/陈旧报价、数据身份、规则指纹和隔离环境中的单文件执行。另覆盖均线、EMA 初值、Wilder RSI、ATR、急跌/单边下跌、历史数据缺口、半日收盘与避免使用未来日线。CI 使用合成数据，不登录 OpenD，不保存真实报价。

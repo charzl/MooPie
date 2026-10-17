@@ -43,7 +43,7 @@ class PutRuleTests(unittest.TestCase):
         self.assertFalse(result['live_review_ready'])
         self.row['market_state'] = 'AFTERNOON'
         self.assertFalse(rules.scan(self.dataset)['ranked'][0]['live_review_ready'])
-        self.dataset['collected_at'] = '2026-10-16T20:00:00+00:00'
+        self.dataset['collected_at'] = '2026-10-16T20:06:00+00:00'
         self.assertTrue(rules.scan(self.dataset)['ranked'][0]['live_review_ready'])
 
     def test_missing_earnings_remain_blocked_in_separate_watchlist(self):

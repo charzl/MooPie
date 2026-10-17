@@ -63,11 +63,12 @@ class CollectorTests(unittest.TestCase):
                     option_standard_type='STANDARD', suspension=False)])
         self.service_patch = patch.object(collector, 'OptionChainService', Service)
         self.sleep_patch = patch.object(collector.time, 'sleep')
-        self.service_patch.start(); self.sleep_patch.start()
+        self.trend_patch = patch.object(collector, 'collect_daily_series', return_value={'daily_series': []})
+        self.service_patch.start(); self.sleep_patch.start(); self.trend_patch.start()
         self.sdk = SimpleNamespace(RET_OK=0, Market=SimpleNamespace(US='US'))
 
     def tearDown(self):
-        self.service_patch.stop(); self.sleep_patch.stop()
+        self.service_patch.stop(); self.sleep_patch.stop(); self.trend_patch.stop()
 
     def collect(self):
         return collector.collect(self.sdk, self.context, ['TEST'], months=1)
@@ -96,6 +97,53 @@ class CollectorTests(unittest.TestCase):
     def test_other_markets_rejected_before_snapshot_calls(self):
         with self.assertRaises(ValueError): collector.collect(self.sdk, self.context, ['HK.00700'])
         self.assertEqual(self.context.calls, [])
+
+
+class HistoryCollectorTests(unittest.TestCase):
+    def test_completed_session_respects_close_half_days_and_weekends(self):
+        days = [dict(time='2026-11-25', trade_date_type='WHOLE'),
+                dict(time='2026-11-27', trade_date_type='MORNING')]
+        for stamp, expected in [('2026-11-27T12:00:00-05:00', '2026-11-25'),
+                                ('2026-11-27T13:04:59-05:00', '2026-11-25'),
+                                ('2026-11-27T13:05:00-05:00', '2026-11-27'),
+                                ('2026-11-29T10:00:00-05:00', '2026-11-27')]:
+            self.assertEqual(collector.completed_session(days, datetime.fromisoformat(stamp)).isoformat(), expected)
+        days[-1]['trade_date_type'] = 'WHOLE'
+        self.assertEqual(collector.completed_session(days, datetime.fromisoformat('2026-11-27T16:04:59-05:00')).isoformat(), '2026-11-25')
+        self.assertEqual(collector.completed_session(days, datetime.fromisoformat('2026-11-27T16:05:00-05:00')).isoformat(), '2026-11-27')
+
+    def test_history_paging_rth_adjustment_and_cutoff(self):
+        class History:
+            def __init__(self): self.calls = []
+            def request_trading_days(self, *args, **kwargs):
+                return 0, [dict(time=day, trade_date_type='WHOLE') for day in ('2026-10-15', '2026-10-16')]
+            def request_history_kline(self, code, **kwargs):
+                self.calls.append(kwargs)
+                day = '2026-10-15' if kwargs['page_req_key'] is None else '2026-10-16'
+                return 0, Rows([dict(time_key=day+' 00:00:00', open=100, high=101, low=99, close=100, volume=1000)]), (b'page2' if kwargs['page_req_key'] is None else None)
+        sdk = SimpleNamespace(RET_OK=0, Market=SimpleNamespace(US='US'), KLType=SimpleNamespace(K_DAY='DAY'),
+                              AuType=SimpleNamespace(QFQ='QFQ'), Session=SimpleNamespace(RTH='RTH'))
+        context = History()
+        result = collector.collect_daily_series(sdk, context, ['US.TEST'], '2026-10-16', datetime.fromisoformat('2026-10-16T16:06:00-04:00'))
+        series = result['daily_series'][0]
+        self.assertEqual(len(series['bars']), 2)
+        self.assertEqual(series['available_at'], '2026-10-16T16:05:00-04:00')
+        self.assertEqual(context.calls[1]['page_req_key'], b'page2')
+        self.assertEqual(context.calls[0]['session'], 'RTH')
+        self.assertEqual(context.calls[0]['autype'], 'QFQ')
+        # Intraday: the response including today's bar must be rejected.
+        context = History()
+        result = collector.collect_daily_series(sdk, context, ['US.TEST'], '2026-10-16', datetime.fromisoformat('2026-10-16T12:00:00-04:00'))
+        self.assertEqual(result['trend_as_of'], '2026-10-15')
+        self.assertIn('future bar', result['daily_series'][0]['error'])
+
+    def test_failed_history_is_explicit(self):
+        context = SimpleNamespace(request_trading_days=lambda *a, **k: (0, [dict(time='2026-10-16', trade_date_type='WHOLE')]),
+                                  request_history_kline=lambda *a, **k: (1, 'history permission denied', None))
+        sdk = SimpleNamespace(RET_OK=0, Market=SimpleNamespace(US='US'), KLType=SimpleNamespace(K_DAY='DAY'),
+                              AuType=SimpleNamespace(QFQ='QFQ'), Session=SimpleNamespace(RTH='RTH'))
+        result = collector.collect_daily_series(sdk, context, ['US.TEST'], '2026-10-16', datetime.fromisoformat('2026-10-16T16:06:00-04:00'))
+        self.assertIn('permission denied', result['daily_series'][0]['error'])
 
 
 if __name__ == '__main__': unittest.main()
