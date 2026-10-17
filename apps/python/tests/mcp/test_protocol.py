@@ -27,6 +27,7 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.structured_content['source'], 'synthetic protocol fixture')
             bad = await client.call_tool('get_market_snapshots', {'codes': ['US.FAIL']})
             self.assertTrue(bad.is_error)
+            self.assertIn('synthetic provider unavailable', ''.join(item.text for item in bad.content))
             malformed = await client.call_tool('get_market_snapshots', {'codes': 3})
             self.assertTrue(malformed.is_error)
             # Provider / validation failures must not kill the MCP process.

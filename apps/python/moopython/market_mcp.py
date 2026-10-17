@@ -76,10 +76,17 @@ def register_tools(server, reader, annotations=None):
 
 def create_server(reader=None):
     from mcp.server import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
     from mcp.types import ToolAnnotations
     server = MCPServer('moomoo-market-data')
     annotations = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=True)
-    return register_tools(server, reader or OpenDReader(), annotations)
+    provider = reader or OpenDReader()
+    def read(operation, **parameters):
+        try:
+            return provider(operation, **parameters)
+        except (ValueError, RuntimeError, OSError) as error:
+            raise ToolError(str(error)) from error
+    return register_tools(server, read, annotations)
 
 
 def main(argv=None):
