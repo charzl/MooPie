@@ -1,97 +1,192 @@
-# Moomoo desktop client experiments
+# Moomoo 行情工具
 
-两个可独立打包的 macOS 行情客户端，用来比较 Python + Qt 与 SwiftUI + 官方 C++ SDK 的体验。
+输入一个美股代码，点击「筛选卖出 Put」或「分析走势」。桌面界面使用同一套抓取服务和独立规则文件，支持 macOS 和 Windows；也可通过 CLI 和本地 MCP 调用。AVGO、NVDA、AAPL 都只是示例。
 
-| 目录 | 界面 | OpenD 接入 |
-| --- | --- | --- |
-| `apps/python` | PySide6 / Qt Widgets | 官方 moomoo Python SDK 10.11.7108 |
-| `apps/swift-cpp` | SwiftUI / Canvas | 官方 C++ SDK 10.11.7108，通过 C ABI 桥接 |
+**首次使用：安装工具 → 在官方 OpenD 登录 → 检查连接 → 开始查询。** 给 agent 的完整操作指南见 [agent.md](agent.md)，自动发现入口为 [AGENTS.md](AGENTS.md)。
 
-目前包含自选列表、搜索、行情表格、K 线与成交量、均线、周期切换和演示模式。Python 版优先推进功能，新增官方自选分组导入、账户资产与持仓只读查询；Swift/C++ 版保留作对照。未实现完整交易和资讯功能。演示行情是生成数据，不可用于投资决策。两版的演示与性能回放使用同一个合成行情文件 `fixtures/market.json`。
+## 1. 安装工具
 
-## 下载 runner 打包结果
+需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。macOS 缺少 uv 时运行 `brew install uv`；Windows 用 `winget install --id=astral-sh.uv -e`，安装后重开终端。脚本会准备 Python **3.14**，无需自己激活虚拟环境。
 
-打开仓库 **Actions → Package Python macOS client → 成功的运行 → Artifacts**：
-
-- `MooPython-macos-arm64`：DMG 安装包、界面预览、包体积 JSON 和安装包校验结果。
-
-日常 CI 只构建 Python 版，不运行性能测试或 Swift/C++ 打包。Swift/C++ 源码保留供以后使用。安装包由 CI 生成，本地只做开发和必要测试。手动触发：`gh workflow run package-python.yml --ref main -f force=true`。
-
-外层 artifact ZIP 解压后，打开 DMG，将应用拖入 Applications。也可从仓库 Releases 直接下载 DMG。当前为 Apple Silicon，系统要求 macOS 14 或以上。客户端为 ad-hoc 签名，尚未公证；首次打开可能需要在系统隐私与安全设置中允许运行。内置 OpenD 保留官方签名。
-
-每次推送 main、创建 PR、推送 v 开头的 tag 都会触发构建；也可在 Actions 页面点 **Run workflow**。使用 GitHub 托管 macOS 15 runner，无需在个人 Mac 上安装 runner。产物保留 14 天。构建会下载并打包真实官方 OpenD；预览使用演示数据，无需账号、预先安装 OpenD 或 secret。
-
-## 本地构建
-
-Python 3.14；由于共用原生更新器，打包也需要 Xcode Command Line Tools：
+获取仓库并安装：
 
 ```sh
-cd apps/python
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements-build.txt
-python3 -m unittest discover -s tests/unit -v
-python3 -m unittest discover -s tests/integration -v
-./scripts/build-app.sh
+git clone https://github.com/charzl/moomoo-clients.git
+cd moomoo-clients
+./setup.sh
 ```
 
-Swift / C++：安装 Xcode Command Line Tools 和 CMake 3.20+（CI 固定 4.1.2）。
+已有仓库时直接进入其根目录，使用最新 `main`。更新或切分支前保留本地未提交修改。
+
+Windows 在 PowerShell 中使用以下安装入口（上面的 clone/cd 相同）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+日常命令使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 <命令>`；若当前会话已允许运行本地脚本，可简写为 `.\moomoo.ps1 <命令>`。上述执行策略仅作用于该子进程，无需修改全局策略。
+
+默认安装 **CLI + MCP**，不要求 Qt 桌面组件。已有环境会复用，所有依赖留在 `apps/python/.venv`。安装失败时先看具体错误，排查方法见 [agent.md](agent.md)。
+
+## 2. 安装并登录 OpenD
+
+1. 从[官方 OpenAPI 下载页](https://www.moomoo.com/download/OpenAPI)下载对应系统的 **moomoo OpenD GUI**，按官方说明安装。
+2. 打开 OpenD，在官方窗口登录并完成验证。已安装、登录的实例直接复用。
+3. 确认本机 API 地址为 **`127.0.0.1:11111`**，保持 OpenD 运行。
+
+OpenD 是行情网关；Python SDK 和 MCP 通过它读取行情。安装本仓库不会代替你完成 OpenD 登录。源码默认 SDK/OpenD 版本信息在 [requirements.txt](apps/python/requirements.txt) 和 [opend.json](runtime/opend.json)。
+
+## 3. 检查是否可以使用
 
 ```sh
-cd apps/swift-cpp
-./scripts/build-sdk.sh
-swift test
-./scripts/build-app.sh
+./moomoo doctor
 ```
 
-C++ 构建脚本从 SDK 附带的源归档编译 protobuf 3.21.5 和 OpenSSL 3.0.17，随后编译官方 SDK。动态库会一起放进应用，运行不依赖本机 Homebrew。生成文件、构建缓存、虚拟环境和应用 ZIP 不进入 Git。
+Windows 对应命令：`powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 doctor`。下文命令相同，换用 Windows 入口即可；多行命令可合为一行执行。
 
-## 真实行情
+会显示 Python、SDK、MCP 版本，并请求一条 AAPL 真实股票快照。成功时显示报价及 broker 更新时间；失败时指出检查位置。可用 `./moomoo doctor --symbol AVGO --port 11111` 更换验证标的或端口。
 
-Python 版连接后，点击自选列表旁的 **moomoo 自选**，获取分组、读取分组，再点击导入；导入替换本地列表并保存前一列表备份，不修改官方账号自选。完整显示当前支持的 US/HK/SH/SZ 标的；同时最多订阅 30 只报价，其余选中后按需读取，并释放旧订阅。K 线保留最多 60 组近期订阅，超出时释放旧订阅。其他市场暂时跳过并显示数量。
+端口连通不等于拥有全部数据权限；股票、期权和历史日线可能分别受权限限制。收盘后得到最近交易时段的数据是正常情况。
 
-侧栏 **账户** 使用主窗口内的账户列表、持仓和资产页签。选择开户券商、交易市场、币种，获取账户后点击账户卡片或“刷新资产与持仓”。区分实盘和模拟账户，账户 ID 保持完整精度，查询失败或切换连接时清空旧数据。只读查询不保存资产/持仓到磁盘；尚未接入的订单、历史和资金明细页签禁用。账户页参考官方布局，但不是所有官方功能的完整复制。
+## 4. 开始查询和分析
 
-独立每日扫描模块见 [modules/rule-engine](modules/rule-engine/README.md)：标准化日线输入、版本化 JSON 规则、MA50 等指标与逐条命中证据，输出可供 Codex 读取的 JSON。模块有独立 wheel 构建和测试流程，当前尚未接入客户端的真实行情采集或 AI 调用。
+以下命令从仓库根目录执行，不用激活虚拟环境。
 
-打包版自动启动内置[官方 OpenD](https://www.moomoo.com/download/OpenAPI)，请在官方窗口登录，启用本机 API（通常 `127.0.0.1:11111`），再在客户端连接设置中填入同一地址和端口。这两个实验客户端仅支持本机未加密 API 连接。账号登录与行情权限由 OpenD 管理，CI 不会登录账号。两版均打包真实官方 OpenD，并共用自动更新器。
-
-已验证构建、数据处理与协议校验；真实 OpenD 端到端联调和统一工作负载下的 CPU / 内存比较仍需进行。runner 自动进行三轮相同负载测试，记录 SDK 已加载时的启动、空闲/更新 CPU 与 RSS、离屏界面更新耗时；它不能代替真实 OpenD 和个人 Mac 上的交互比较。CPU 100% 代表一个核心，离屏截图耗时不是显示 FPS。两版 UI 框架不同，结果比较的是整套方案。
-
-测试分层与当前覆盖范围见 [tests/README.md](tests/README.md)。两版使用原创共用图标；生成源码是 `scripts/render-icon.swift`，运行 `scripts/build-icon.sh` 可重建 icns。
-
-## 第三方代码
-
-`apps/swift-cpp/vendor/MMAPI4CPP_10.11.7108` 来自官方 SDK 下载包，保留原始版权声明与第三方归档；项目自有代码的 MIT 许可不覆盖此目录。Python SDK 与 Qt 等依赖保留各自许可。参见 [THIRD_PARTY.md](THIRD_PARTY.md)。
-
-## Bundled real OpenD and automatic updates
-
-Both macOS packages now include the **pristine official GUI moomoo OpenD 10.11.7108**, including its frameworks and login UI. It is a universal Intel/Apple Silicon binary. `runtime/opend.json` pins the official archive URL and SHA-256 for reproducible builds; its original Developer ID signature (Team ID `6HE4ZULJ45`, bundle ID `com.moomoo.opend`) is preserved. OpenD is proprietary third-party software and is not covered by this repository's MIT license.
-
-On normal app startup, the native `OpenDManager` helper installs a shared runtime into `~/Library/Application Support/MooClients/OpenD`, opens the official login window, and checks for updates in the background. Both clients use this same gateway; an already running official OpenD is reused and never killed. Sign in through **OpenD's own window**, then use **Connect OpenD** in the client. Credentials are handled by official OpenD, not these clients. Closing either client leaves the shared gateway running. Previews, SDK tests and UI benchmarks do not auto-launch OpenD.
-
-Updates are checked on startup (at most once per 24 hours) and every 24 hours while a client stays open. Settings provide **Launch / Login**, **Check updates**, and **Rollback**. The updater uses moomoo's latest-link endpoint and the official Futu endpoint as a version-only fallback; it always downloads the **moomoo** artifact over HTTPS. It checks bundle identity, expected version, CPU architecture, and the official publisher's signature before atomically changing the selected version. The currently running gateway is not restarted. Quit the official OpenD and launch it again to use the newly staged version; the preceding version remains available for rollback. Concurrent updates are prevented with a process lock. Failed downloads, invalid signatures and invalid packages leave the selected version unchanged. A launch-command failure attempts the previous version; failures after launch or account login still require manual rollback.
-
-OpenD updates do **not** rewrite the Python or C++ SDK inside a signed/frozen client. Local builds use pinned SDK versions; CI automatically resolves official SDK updates, tests and rebuilds both clients, and publishes new installers only when all checks pass. Updating OpenD alone cannot guarantee perpetual API compatibility.
-
-The official GUI OpenD currently occupies about **735 MiB**, so it dominates both package sizes. There is also one shared runtime copy on first launch, plus retained versions and official caches; previous small client-only package sizes no longer describe these bundles. UI benchmark CPU/RSS still measures only the client process, without a logged-in OpenD. Live end-to-end resource comparisons need a logged-in gateway on the same Mac.
-
-The runners test the updater and actually launch the bundled, publisher-signed GUI OpenD for a five-second smoke test without account credentials. This verifies packaging and startup, **not** live quotes or account permissions.
+**查询未来三个月的 Put 到期日、行权价和合约代码：**
 
 ```sh
-swift test --package-path runtime
-python3 scripts/smoke-opend.py apps/python/dist/MooPython.app artifacts/python-opend-smoke.json
-python3 scripts/smoke-opend.py apps/swift-cpp/dist/MooSwiftCpp.app artifacts/swift-cpp-opend-smoke.json
+mkdir -p artifacts/options
+./moomoo options AVGO --months 3 --type PUT \
+  --output artifacts/options/AVGO-puts.json
 ```
 
-## Automatic CI upgrades and DMG releases
+这里是合约表，实时权利金需要另取快照。查询日期须为今天或未来；原始 `options` 命令另支持港股，但综合采集、MCP 和 Put 规则目前仅支持美股。
 
-[Releases](https://github.com/charzl/moomoo-clients/releases) contains drag-to-Applications Python DMG installers as experimental prereleases. The workflow checks official SDK/OpenD versions daily, on main pushes and on manual dispatch. A compatible Python SDK/OpenD pair is resolved for the Python client. The official Python source distribution is hash-pinned; SDK directories, bundled dependency archives and dylib identities are read from build metadata instead of a fixed version path.
+**抓取合约、报价、日线、财报，再运行独立规则：**
 
-Upgrades happen in ephemeral CI checkouts, without automatically changing the main branch. Local source defaults stay pinned in `runtime/sdk.json` and `runtime/opend.json`. Each release includes `resolved-build.json` with the actual source commit, SDK/OpenD versions, official URLs and SHA-256 hashes, plus `SHA256SUMS.txt` for the Python installer.
+```sh
+./moomoo collect AVGO NVDA AAPL --months 3 \
+  --output artifacts/put-screen/input.json
 
-Publication requires Python unit and integration tests, real OpenD update/startup acceptance, mounted-DMG identity/signature checks. Downloads, hashes, incompatible versions, compilation or tests failing prevent publication; the previous Release is never overwritten. Breaking API changes may still require changes to our adapter code; CI does not automatically repair application code.
+./moomoo analyze artifacts/put-screen/input.json \
+  --output artifacts/put-screen/ranking.json \
+  --csv-output artifacts/put-screen/ranking.csv
+```
 
-Already published source/version combinations skip the expensive builds. Manual dispatch offers `force` to create another build. The Python installer and validation evidence are uploaded to a draft first; the draft becomes public only when every asset's name and size is verified. Releases persist; Actions artifacts expire after 14 days. GitHub scheduled workflows can run late and must remain enabled on the default branch.
+抓取联网，分析离线。规则引擎先执行硬边界，再比较留下的合约，默认收益指标为 **权利金 ÷ 全额担保本金 ÷ 剩余自然日**。`recommendations` 严格返回当前排序的Top N，可选5/10/20，默认10；不足所选数量就返回实际数量，不强制分散到期日。`best_recommendation` 是第一名。`ranked` 保留完整排序，数量选择不限制抓取范围。每项包含日期、剩余天数、行权价、担保成本及收益/风险/综合分。
 
-Installed OpenD's own automatic updates and CI's SDK-driven client rebuilds are separate. Download the new client DMG from Releases to replace an installed client.
+可用 `--rank-by duration`（到期时长从短到长）、`--rank-by cost`（行权价×100的担保成本从低到高）、`--rank-by return`（收益高优先）、`--rank-by risk`（风险低优先）、`--rank-by balanced`（综合分高优先），与 `--config`、`--top 5|10|20` 组合使用。初版风险包含 Delta、下跌情景亏损、趋势、流动性、财报五项；综合分初始为 `50%×收益分 + 50%×(100−风险分)`。权重和尺度可调，均为未校准研究参数，风险分不是亏损概率。完整公式见[评分说明](docs/put-scoring.md)。
+
+日均毛收益率是完整保留权利金时的比较值，不是每天实际到账或保证盈利。例如每张权利金 $200、担保本金 $10,000、剩余30天，日均为 `200 / 10000 / 30 × 100% = 0.0667%`。本金按 `行权价 × 100股`，使用 Bid 估算权利金，尚未扣除费用。
+
+修改 [put_rules.py](modules/put-screener/put_rules.py) 后，可对同一个输入重新分析，无需重新抓取或打包。可传 `--budget 25000` 限制一份合约的接股现金。规则是待验证的研究条件，不代表已经回测的收益优势或未来涨跌概率。详见[规则说明](modules/put-screener/README.md)。
+
+所有命令可加 `--help`；总入口为 `./moomoo --help`。
+
+## 5. 让 agent 使用 MCP
+
+我们使用的是**本仓库自建的 `moomoo-market-data` 服务**，底层为官方 Python `mcp` SDK 的 `MCPServer`，通过本地 **stdio** 接口调用 OpenD。
+
+| MCP 工具 | 用途 |
+| --- | --- |
+| `get_market_snapshots` | 股票/期权快照、可用的 Bid/Ask、Delta、IV 等 |
+| `get_option_chain` | 期权到期日、行权价和合约代码 |
+| `get_daily_bars` | 已完成的常规时段前复权日线 |
+| `get_earnings_calendar` | 每次 1–7 个自然日的美股财报日历 |
+
+**Codex CLI 已安装时**，在仓库根目录添加服务：
+
+```sh
+codex mcp add moomoo-market-data -- "$(pwd -P)/moomoo" mcp
+codex mcp get moomoo-market-data
+```
+
+Windows 用项目虚拟环境的绝对解释器路径注册，避免宿主依赖 PowerShell 的执行策略：
+
+```powershell
+$MoomooPython = Join-Path (Get-Location).Path "apps\python\.venv\Scripts\python.exe"
+codex mcp add moomoo-market-data -- $MoomooPython -X utf8 -m moopython.market_mcp
+```
+
+先用 `codex mcp list` 检查同名配置，已有服务时按 [agent.md](agent.md) 核对和更新。新开 agent 会话或重载 MCP，确认四个工具实际出现；Codex CLI 交互界面可用 `/mcp` 查看。[官方配置说明](https://developers.openai.com/codex/mcp/)
+
+使用 `mcpServers` JSON 的其他宿主，可配置：
+
+```json
+{
+  "mcpServers": {
+    "moomoo-market-data": {
+      "command": "/ABSOLUTE/PATH/moomoo-clients/moomoo",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Windows JSON 配置把 `command` 换成实际 `C:/.../apps/python/.venv/Scripts/python.exe`，`args` 使用 `["-X", "utf8", "-m", "moopython.market_mcp"]`。
+
+替换为实际仓库绝对路径。MCP 服务由宿主按需启动；手动运行 `./moomoo mcp` 后等待输入是正常状态，它不是 HTTP 服务，也不会主动打印行情。
+
+接入后可以问：
+
+> 读取 AVGO 最新快照和已完成日线，分析未来几天到几周的走势。给出数据日期、指标证据、关键价位及改变判断的条件。
+
+> 查询 NVDA 未来三个月 Put，抓取报价后使用仓库的独立规则筛选，解释未通过的条件。
+
+## 6. 可选：桌面界面
+
+需要 MooPie 图形界面时再安装：
+
+```sh
+./setup.sh --desktop
+./moomoo desktop
+```
+
+Windows 在 PowerShell 执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Desktop
+powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
+```
+
+输入股票代码，选择一个功能：
+
+- **筛选卖出 Put**：抓取未来三个月合约、报价、日线和财报。主界面选择Top 5/10/20及到期时长、担保成本、收益、风险或综合排序。列表显示到期日期/剩余天数、行权价/担保成本、日均毛收益率、风险分及综合分；详情保留收益分、评分贡献、权利金、盈亏平衡和最大亏损。设置页可自定义升降序。切换数量和排序时复用完整缓存，不重新抓取。
+- **分析走势**：用已完成日线计算 MA20/50/200、RSI、MACD 和成交量，展示未来 5–20 个交易日的条件判断、关键价位及改判依据。它不是盘中预测或涨跌概率模型。
+
+两个结果均标注股票、数据时间，可导出完整 JSON。查询在独立进程运行，可以取消；输入另一只股票会清空旧结果。默认连接本机 OpenD，界面可改端口。无需配置 MCP 或外部 AI API Key。
+
+点「Filter / Sort 设置」：
+
+- **Filter 页面**：勾选条件、调整不可越过的边界。基础预设为7–90天、行权价不高于现价、绝对 Delta ≤0.30、Bid ≥$0.10、买盘数量 ≥1、价差 ≤15%，且报价属于采集交易日。这些数值仅作研究示例，未代表你的个人承受范围。趋势、最低 Delta、成交量、未平仓量和财报默认仅供参考；可勾选升级为硬限制。标准100股、未停牌和必要数据检查始终执行。
+- **组合范围过滤**：Filter 页面最前面可选成本下限（`>`）、成本上限（`<`）、最低日均毛收益率（`>`）、最高风险分（`<`）、到期截止日（`<`，不含当天）。成本是行权价×100的美元金额；收益门槛输入0.05表示0.05%/天。先对完整候选应用全部条件，再返回所选Top 5/10/20，符合者不足则返回实际数量。
+- **Sort 页面**：独立选择最多三项排序指标及升降序。默认日均毛收益率从高到低，再比较价差与绝对 Delta。简单年化为日均值乘365，排序等价；改变 Sort 不改变候选名单。
+- **收益 / 风险评分页面**：调整五项风险权重、下跌情景、未知信息惩罚、收益分参考目标，以及综合分中的收益权重。风险分0–100，越低越好；收益分、综合分越高越好。默认权重和尺度只是原型参数；修改评分不更改过滤阈值，但启用风险分过滤时会影响是否通过。
+- **没有结果**：面板显示实际指标、阈值、排除数量，以及关闭单项或趋势/财报组合后的候选数量预览。预览不自动应用条件；各项排除数量可能重叠。
+- **调整后重跑**：已有数据时，点击“应用并重新筛选（已有数据）”离线重算，不重新请求 OpenD；结果保留原始采集时间。点击主界面“筛选卖出 Put”才刷新行情。更换股票或端口会清空缓存。设置会保留到下次打开。
+
+关闭 Filter 不会消除风险：财报未知、默认趋势未通过和历史数据不可验证等提示仍保留。IV=0 作为未知展示，不参与当前排序；无效报价、Delta 或身份不一致等基础问题不会因关闭 Filter 而放行。
+
+CLI 同样支持配置文件：`./moomoo analyze input.json --config filters.json --output ranking.json`，格式见[独立规则说明](modules/put-screener/README.md)。导出桌面 JSON 会保留原始输入、实际 Filter / Sort 配置与逐合约证据。
+
+新版使用独立的推荐配置记录，首次启动采用上述基础预设，不自动继承旧版全部启用的严格筛选配置；旧配置记录保留。恢复默认 Filter 恢复基础预设。若仍需原先全条件扫描，可用 CLI 的 `--scan-only` 或独立引擎的 `scan()`。
+
+Put 排序依据保留在 [put_rules.py](modules/put-screener/put_rules.py)，趋势解释在同文件的 `describe_trend()`。源码运行修改后立即生效；wheel 和桌面分发包带构建时的规则快照，修改后需要重新打包。原有行情面板可用 `./moomoo desktop --classic` 打开。
+
+Windows 可在成功的 **Client platform CI** 中下载 `moomoo-tools-Windows`，取其中 `MooPie-windows-x64.zip`，完整解压后双击文件夹内的 `MooPie.exe`。这是便携版，不是安装向导；不需要另装 Python，但仍需安装并登录官方 OpenD。
+
+macOS 也可从成功的 GitHub Actions 或 Releases 下载 `MooPie-macos-arm64`，打开 DMG 并拖到 Applications。打包应用的 OpenD 管理器可独立下载、验签和启动官方 OpenD；仍需在其官方窗口登录。DMG 不会替 agent 宿主注册 MCP。
+
+## 开发与更多说明
+
+桌面、CLI 和 MCP 共用 Python 抓取服务；规则保留为独立文件。当前保存 JSON，数据库和旧数据清理后续再做。wheel 提供 `moomoo-options`、`moomoo-data`、`moomoo-mcp`、`moomoo-research`；安装 desktop extra 后还可运行 `moomoo-desktop`。根目录 `./moomoo` 是方便源码使用的统一入口。
+
+- [agent 安装、验证与排查](agent.md)
+- [数据接口与架构](docs/market-data.md)
+- [独立 Put 规则](modules/put-screener/README.md)
+- [测试分层](tests/README.md)
+- [第三方许可](THIRD_PARTY.md)
+
+完整 DMG 交给 GitHub CI 构建；本地做开发、必要测试和 wheel 验证。CI 不登录个人 OpenD，真实数据权限以本机 `doctor` 和实际 MCP 调用为准。
+
+跨平台 CI 见 [client-platforms.yml](.github/workflows/client-platforms.yml)：Windows 与 macOS 独立验证安装、无 Qt 默认依赖、命令、MCP、规则、独立 wheel 和界面。Windows 额外打包并实际启动 EXE；macOS DMG 由现有打包工作流生成并验证。
