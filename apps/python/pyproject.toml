@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moomoo-clients"
+version = "0.4.0"
+description = "Reusable moomoo market data tools, local MCP server and optional desktop client"
+requires-python = ">=3.14,<3.15"
+dynamic = ["dependencies"]
+
+[project.scripts]
+moomoo-options = "moopython.options_cli:main"
+moomoo-data = "moopython.market_data_cli:main"
+moomoo-mcp = "moopython.market_mcp:main"
+moomoo-research = "moopython.research_cli:main"
+
+[project.gui-scripts]
+moomoo-desktop = "moopython.research_ui:main"
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.3,<3"]
+desktop = ["PySide6-Essentials==6.12.0"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["moopython*"]
+
+[tool.setuptools.package-data]
+moopython = ["fonts/*"]

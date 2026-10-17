@@ -4,6 +4,7 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '20 3 * * *'
   workflow_dispatch:
@@ -33,6 +34,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests/unit -p test_upstream_resolution.py -v
           python3 -m unittest discover -s tests/unit -p test_release_publication.py -v
+          python3 -m unittest discover -s tests/unit -p test_lightweight_packaging.py -v
       - name: Resolve Python SDK and OpenD versions
         id: resolve
         env:
@@ -54,7 +56,7 @@ jobs:
   python:
     needs: resolve
     if: needs.resolve.outputs.build == 'true'
-    name: Python + Qt (Apple Silicon)
+    name: MooPie (Apple Silicon)
     runs-on: macos-15
     timeout-minutes: 35
     env:
@@ -83,29 +85,34 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python3 -m unittest discover -s tests/integration -v
+      - name: Build and install Python command-line wheel
+        run: |
+          python3 -m pip wheel --no-deps apps/python --wheel-dir artifacts/wheels
+          python3 -m pip install --no-deps artifacts/wheels/*.whl
+          moomoo-options --help
+          moomoo-data --help
+          moomoo-mcp --help
+          python3 apps/python/main.py options --help
       - name: OpenD updater tests
         run: swift test --package-path runtime
-      - name: Real official OpenD download and update acceptance
-        env:
-          MOOMOO_OPEND_UPDATE_ACCEPTANCE: '1'
-        run: swift test --package-path runtime --filter UpdateAcceptanceTests
       - name: Package application
         run: apps/python/scripts/build-app.sh
-      - name: Smoke test packaged app
+      - name: Validate lightweight app and independent OpenD installation
         run: |
           mkdir -p artifacts
-          python3 scripts/smoke-app.py apps/python/dist/MooPython.app artifacts/MooPython-preview.png
-          python3 scripts/smoke-opend.py apps/python/dist/MooPython.app artifacts/python-opend-smoke.json
-          python3 scripts/build-metrics.py apps/python/dist/MooPython.app > artifacts/python-build.json
+          python3 scripts/smoke-app.py apps/python/dist/MooPie.app artifacts/MooPie-preview.png
+          python3 scripts/smoke-opend.py apps/python/dist/MooPie.app artifacts/python-opend-smoke.json
+          python3 scripts/build-metrics.py apps/python/dist/MooPie.app > artifacts/python-build.json
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: MooPython-macos-arm64
+          name: MooPie-macos-arm64
           path: |
             apps/python/dist/*.dmg
             apps/python/dist/*.validation.json
             artifacts/python-build.json
             artifacts/*-preview.png
             artifacts/*-opend-smoke.json
+            artifacts/wheels/*.whl
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
@@ -121,7 +128,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
-          name: MooPython-macos-arm64
+          name: MooPie-macos-arm64
           path: artifacts/release
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:

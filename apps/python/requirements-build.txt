@@ -1,2 +1,4 @@
 -r requirements.txt
+# Keep the desktop version aligned with the desktop extra in pyproject.toml.
+PySide6-Essentials==6.12.0
 pyinstaller==6.22.3

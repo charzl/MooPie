@@ -39,12 +39,20 @@ def prepare():
     binpath=pathlib.Path(run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release','--show-bin-path').strip())/'OpenDManager'
     return app,binpath
 def main():
-    app,helper=prepare()
-    if len(sys.argv)==1: return
-    dest=pathlib.Path(sys.argv[1])/'Contents/Resources/OpenD'
+    updater_only = '--updater-only' in sys.argv
+    if updater_only:
+        run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release')
+        helper=pathlib.Path(run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release','--show-bin-path').strip())/'OpenDManager'
+        app=None
+    else: app,helper=prepare()
+    arguments=[arg for arg in sys.argv[1:] if arg != '--updater-only']
+    if not arguments: return
+    dest=pathlib.Path(arguments[0])/'Contents/Resources/OpenD'
     dest.mkdir(parents=True,exist_ok=True)
-    run('ditto',str(app),str(dest/'moomoo_OpenD.app'))
+    if updater_only:
+        if (dest/'moomoo_OpenD.app').exists(): shutil.rmtree(dest/'moomoo_OpenD.app')
+    else: run('ditto',str(app),str(dest/'moomoo_OpenD.app'))
     shutil.copy2(helper,dest/'OpenDManager'); shutil.copy2(ROOT/'runtime/opend.json',dest/'opend.json')
     run('codesign','--force','--sign','-',str(dest/'OpenDManager'))
-    print(f"Embedded official signed OpenD {META['version']}; signature retained")
+    print('Embedded OpenD updater and metadata only; official OpenD is installed separately' if updater_only else f"Embedded official signed OpenD {META['version']}; signature retained")
 if __name__=='__main__': main()

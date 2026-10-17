@@ -1,12 +1,21 @@
 import unittest
-from moopython.market import Candle, Quote, symbol, parse_candles, merge_candles, averages, demo_candles
+from moopython.market import Candle, Quote, symbol, display_symbol, parse_candles, merge_candles, averages, demo_candles
 
 class MarketTests(unittest.TestCase):
  def test_symbols(self):
   self.assertEqual(symbol(' hk.00700 '), 'HK.00700')
   self.assertEqual(symbol('US.BRK.B'), 'US.BRK.B')
-  for value in ('AAPL','US.bad symbol','https://example.com'):
+  self.assertEqual(symbol(' pltr '),'US.PLTR')
+  self.assertEqual(symbol('AAPL'),'US.AAPL')
+  self.assertEqual(symbol('BRK.B'),'US.BRK.B')
+  for value in ('00700','US.bad symbol','https://example.com'):
    with self.assertRaises(ValueError): symbol(value)
+  with self.assertRaises(ValueError): symbol('SG.BAD',allow_short=False)
+ def test_display_codes_preserve_market_and_share_class(self):
+  self.assertEqual(display_symbol('US.PLTR'),'PLTR')
+  self.assertEqual(display_symbol('US.BRK.B'),'BRK.B')
+  self.assertEqual(display_symbol('HK.00700'),'HK.00700')
+  self.assertIsNone(display_symbol(None))
  def test_quote_nan_and_int64(self):
   quote=Quote.from_row(dict(code='US.AAPL',last_price=110,prev_close_price=100,volume='123456789',after_price=float('nan')))
   self.assertEqual(quote.percent,10)

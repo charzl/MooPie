@@ -30,6 +30,25 @@ class AccountTests(unittest.TestCase):
   self.command['op']='accounts'
   result=query_accounts(self.sdk,'127.0.0.1',11111,self.command)
   self.assertEqual(result['accounts'][0]['acc_id'],str(ID))
+ def test_position_failure_preserves_cash_and_reports_error(self):
+  self.sdk.OpenSecTradeContext.position_list_query=lambda *_args,**_kwargs:(-1,'position permission denied')
+  result=query_accounts(self.sdk,'127.0.0.1',11111,self.command)
+  self.assertEqual(result['funds'][0]['cash'],100); self.assertEqual(result['positions'],[])
+  self.assertIn('permission denied',result['errors'][0]); self.assertEqual(self.closed,[True])
+ def test_history_and_cashflow_use_selected_account_and_explicit_dates(self):
+  calls=[]
+  self.sdk.OpenSecTradeContext.history_deal_list_query=lambda *_args,**kwargs:(calls.append(kwargs) or (0,Rows([])))
+  self.sdk.OpenSecTradeContext.get_acc_cash_flow=lambda *_args,**kwargs:(calls.append(kwargs) or (0,Rows([])))
+  for kind in ('history','cashflow'):
+   command=dict(self.command,op='account_activity',kind=kind,start='2026-10-01',end='2026-10-10',date='2026-10-10')
+   result=query_accounts(self.sdk,'127.0.0.1',11111,command)
+   self.assertEqual(result['rows'],[]); self.assertEqual(calls[-1]['acc_id'],ID); self.assertEqual(calls[-1]['trd_env'],'REAL')
+  self.assertEqual(calls[0]['start'],'2026-10-01'); self.assertEqual(calls[1]['clearing_date'],'2026-10-10')
+ def test_crypto_category_selects_crypto_context(self):
+  self.sdk.OpenCryptoTradeContext=self.sdk.OpenSecTradeContext
+  result=query_accounts(self.sdk,'127.0.0.1',11111,dict(self.command,category='CRYPTO'))
+  self.assertEqual(result['funds'][0]['cash'],100)
+  self.assertNotIn('filter_trdmarket',self.calls[0][1])
  def test_sdk_error_closes_context(self):
   self.sdk.OpenSecTradeContext.accinfo_query=lambda *_args,**_kwargs:(-1,'test permission denied')
   with self.assertRaisesRegex(RuntimeError,'permission denied'): query_accounts(self.sdk,'127.0.0.1',11111,self.command)

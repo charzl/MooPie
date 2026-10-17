@@ -47,7 +47,7 @@ class UserDataTests(unittest.TestCase):
   self.window.show_accounts()
   self.assertIs(self.window.pages.currentWidget(),self.window.account_page)
   self.assertTrue(self.window.nav_buttons['账户'].isChecked())
-  self.assertFalse(self.window.account_page.tabs.isTabEnabled(2))
+  self.assertTrue(self.window.account_page.tabs.isTabEnabled(2))
   self.window.show_charts(); self.assertEqual(self.window.pages.currentIndex(),0)
   self.assertFalse(self.window.nav_buttons['账户'].isChecked())
  def test_account_display_clears_on_selection_change_and_error(self):

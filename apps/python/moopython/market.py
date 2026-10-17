@@ -21,11 +21,16 @@ PERIODS = {"日K": "K_DAY", "周K": "K_WEEK", "月K": "K_MON", "1分": "K_1M", "
 NAMES = {"US.PLTR": "Palantir", "US.INTC": "英特尔", "US.AVGO": "博通", "US.TEM": "Tempus AI", "US.NVDA": "英伟达", "US.AAPL": "苹果", "US.AMZN": "亚马逊", "US.MSFT": "微软", "US.TSLA": "特斯拉", "HK.00700": "腾讯控股", "HK.00981": "中芯国际", "HK.09988": "阿里巴巴-W", "HK.01810": "小米集团-W"}
 DEFAULT_SYMBOLS = list(NAMES)
 
-def symbol(value):
+def symbol(value, allow_short=True):
     value = value.strip().upper()
+    if allow_short and re.fullmatch(r"[A-Z][A-Z0-9_-]*(?:\.[A-Z0-9_-]+)*", value) and not value.startswith(('US.','HK.','SH.','SZ.')):
+        value = 'US.' + value
     if not re.fullmatch(r"(US|HK|SH|SZ)\.[A-Z0-9][A-Z0-9._-]{0,31}", value):
-        raise ValueError("请输入 US.AAPL、HK.00700、SH.600519 或 SZ.000001")
+        raise ValueError("请输入 PLTR、AAPL、HK.00700、SH.600519 或 SZ.000001")
     return value
+
+def display_symbol(value):
+    return value[3:] if isinstance(value, str) and value.startswith('US.') else value
 
 def number(value, default=0.0):
     try:
@@ -73,7 +78,7 @@ class Quote:
 
     @classmethod
     def from_row(cls, row):
-        code = symbol(str(row["code"]))
+        code = symbol(str(row["code"]),allow_short=False)
         name = row.get("name")
         if not isinstance(name, str) or not name:
             name = NAMES.get(code, code.split(".", 1)[1])

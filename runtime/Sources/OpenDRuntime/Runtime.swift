@@ -130,10 +130,34 @@ public final class Manager {
         }
         guard let latest else { throw RuntimeError.invalid("更新服务暂不可用，保留 OpenD \(state.current)") }
         guard try Policy.newer(latest, than: state.current) else { return "OpenD \(state.current) 已是最新版" }
-        let existing = try store.app(latest)
-        if fm.fileExists(atPath: existing.path), (try? validate(existing, version: latest)) != nil {
-            try store.activate(latest, validate: { try self.validate($0, version: latest) })
-            return "OpenD \(latest) 已校验并选中；重新启动官方 OpenD 生效"
+        return try install(version: latest)
+    }
+    /// Reuse a shared official gateway, or install the pinned gateway once.
+    public func ensureInstalled(version: String, sha256: String, allowDownload: Bool = true) throws {
+        _ = try Policy.parts(version)
+        guard sha256.count == 64, sha256.allSatisfy({ $0.isASCII && ($0.isNumber || ("a"..."f").contains(String($0))) }) else { throw RuntimeError.invalid("Invalid OpenD archive checksum") }
+        if let state = try store.read() {
+            try validate(store.app(state.current), version: state.current)
+            if !(try Policy.newer(version, than: state.current)) { return }
+        } else {
+            let candidates = NSRunningApplication.runningApplications(withBundleIdentifier: "com.moomoo.opend").compactMap { $0.bundleURL } + [URL(fileURLWithPath: "/Applications/moomoo_OpenD.app")]
+            for candidate in candidates {
+                guard (try? validate(candidate)) != nil,
+                      let data = try? Data(contentsOf: candidate.appendingPathComponent("Contents/Info.plist")),
+                      let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                      let actual = info["CFBundleShortVersionString"] as? String,
+                      !(try Policy.newer(version, than: actual)) else { continue }
+                try bootstrap(bundle: candidate, version: actual); return
+            }
+        }
+        guard allowDownload else { throw RuntimeError.invalid("尚未安装兼容的 OpenD；首次使用需要联网下载") }
+        _ = try install(version: version, sha256: sha256)
+    }
+    private func install(version: String, sha256: String? = nil) throws -> String {
+        let existing = try store.app(version)
+        if fm.fileExists(atPath: existing.path), (try? validate(existing, version: version)) != nil {
+            try store.activate(version, validate: { try self.validate($0, version: version) })
+            return "OpenD \(version) 已校验并选中；重新启动官方 OpenD 生效"
         }
         if NSRunningApplication.runningApplications(withBundleIdentifier: "com.moomoo.opend").contains(where: { $0.bundleURL?.standardizedFileURL == existing.standardizedFileURL }) {
             throw RuntimeError.invalid("待更新路径仍有 OpenD 运行；请退出官方 OpenD 后重试")
@@ -142,21 +166,25 @@ public final class Manager {
         try fm.createDirectory(at: stage, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: stage) }
         let archive = stage.appendingPathComponent("download.tar.gz")
-        try command("/usr/bin/curl", ["--fail", "--silent", "--show-error", "--proto", "=https", "--max-time", "600", "--max-filesize", "1073741824", "--output", archive.path, try Policy.downloadURL(latest).absoluteString])
-        let entry = "moomoo_OpenD_\(latest)_Mac/moomoo_OpenD-GUI_\(latest)_Mac/moomoo_OpenD-GUI_\(latest)_Mac.dmg"
+        try command("/usr/bin/curl", ["--fail", "--silent", "--show-error", "--proto", "=https", "--max-time", "600", "--max-filesize", "1073741824", "--output", archive.path, try Policy.downloadURL(version).absoluteString])
+        if let expected = sha256 {
+            let actual = try command("/usr/bin/shasum", ["-a", "256", archive.path]).split(separator: " ").first.map(String.init)
+            guard actual == expected else { throw RuntimeError.invalid("Official OpenD archive SHA-256 mismatch") }
+        }
+        let entry = "moomoo_OpenD_\(version)_Mac/moomoo_OpenD-GUI_\(version)_Mac/moomoo_OpenD-GUI_\(version)_Mac.dmg"
         try command("/usr/bin/tar", ["-xzf", archive.path, "-C", stage.path, entry])
         let mount = stage.appendingPathComponent("mount")
         try fm.createDirectory(at: mount, withIntermediateDirectories: true)
         try command("/usr/bin/hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", mount.path, stage.appendingPathComponent(entry).path])
         defer { _ = try? command("/usr/bin/hdiutil", ["detach", mount.path]) }
         let app = mount.appendingPathComponent("moomoo_OpenD.app")
-        try validate(app, version: latest)
-        let destination = try store.app(latest)
+        try validate(app, version: version)
+        let destination = try store.app(version)
         // A failed previous install is discarded; the selected current version is never touched.
         if fm.fileExists(atPath: destination.deletingLastPathComponent().path) { try fm.removeItem(at: destination.deletingLastPathComponent()) }
         try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try command("/usr/bin/ditto", [app.path, destination.path])
-        try store.activate(latest, validate: { try self.validate($0, version: latest) })
-        return "已下载并校验 OpenD \(latest)；退出官方 OpenD 后重新启动即可使用，旧版可回退"
+        try store.activate(version, validate: { try self.validate($0, version: version) })
+        return "已下载并校验 OpenD \(version)；退出官方 OpenD 后重新启动即可使用，旧版可回退"
     }
 }
