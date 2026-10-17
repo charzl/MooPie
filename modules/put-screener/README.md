@@ -4,16 +4,18 @@
 
 Filter 决定保留哪些合约，Sort 独立决定保留者的顺序。`TREND_RULES`、`RULES`、`SORT_ORDER` 是可编辑的默认值；每次运行可通过 JSON `configuration` 覆盖开关、阈值和排序，不改变默认值。已启用的 Filter 必须全部通过；关闭的条件不再排除，但相关风险仍保留。标准100股/未停牌和计算所需基础数据检查始终执行。报告记录实际配置、指纹和输入数据指纹，便于复现。
 
+可选范围Filter为 `min-cost`（成本>下限）、`max-cost`（成本<上限）、`min-daily-return`（日均毛收益率>门槛）、`max-risk`（风险分<上限）、`expiry-before`（到期日<ISO日期，不含当天）。它们默认关闭；成本为美元金额，收益门槛0.05表示0.05%/天。全部条件在完整候选上检查，再排序截取所选Top 5/10/20；风险分限制使用当前评分模型。组合配置示例见[评分说明](../../docs/put-scoring.md)。
+
 新增指标或修改默认规则时仍只编辑同一 `put_rules.py`，提高 `RULESET_VERSION`。日常入口是 `recommend(dataset, budget=None, configuration=None, top_n=10)`，CLI 和桌面均使用它。基础边界由同一文件的 `RECOMMENDATION_BOUNDARIES` 定义；`recommendation_configuration()` 返回该配置。旧的 `scan()` / CLI `--scan-only` 保留原全部条件启用的默认配置，用于单独审查和兼容。
 
 规则引擎直接返回：
 
 - `decision` / `decision_summary`：边界内是否有候选；没有时保留空结果。
 - `best_recommendation`：总体排序第一名的日期、行权价、权利金、担保本金、日均毛收益率及盈亏平衡。
-- `recommendations`：严格返回当前排序前10项（可设 `top_n`），不足10项返回实际数量。`overall_rank` 与完整 `ranked` 一致，不为分散到期日跳过更高名次。
+- `recommendations`：严格返回当前排序的Top N，桌面可选5/10/20，默认10；不足所选数量返回实际数量。先对完整候选排序再截取，不限制抓取范围。`overall_rank` 与完整 `ranked` 一致，不为分散到期日跳过更高名次。
 - 每个推荐的 `reasons`、`tradeoffs`、`risk_notes`、`scenarios`：选择依据、Delta/价差/最大亏损、未知信息及到期时股价不变或下跌10/20/30/100%的损益（费用前）。UI 直接展示这些结果。
 - `expiration_comparisons`：每个到期日的最优合约；`comparison_basis`：公式、实际排序和选择策略；实际配置与原始指纹仍保留。
-- `return_score` / `risk_score` / `composite_score`：收益分、风险分和综合分；`scoring.components` 有每项风险权重、贡献、证据和未知状态，`ranking_views` 提供三种排序的Top代码。评分初版为可修改的研究假设，不是概率或预期损失模型。[完整公式与配置](../../docs/put-scoring.md)。
+- `return_score` / `risk_score` / `composite_score`：收益分、风险分和综合分；`scoring.components` 有每项风险权重、贡献、证据和未知状态，`ranking_views` 提供到期时长、担保成本、收益、风险、综合五种排序的Top代码。评分初版为可修改的研究假设，不是概率或预期损失模型。[完整公式与配置](../../docs/put-scoring.md)。
 
 默认排名为 **日均权利金毛收益率 = 每张 Bid 权利金 ÷ 全额现金担保本金 ÷ 剩余自然日 × 100%**。假设完整保留权利金，不是每天实际盈利，也不是扣除风险后的预期回报。例：$200 / $10,000 / 30 ×100%=0.0667%/天。硬边界限定允许承担的风险后，才比较该指标；没有额外软分数门槛。
 

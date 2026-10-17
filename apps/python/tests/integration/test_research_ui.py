@@ -7,7 +7,7 @@ import time
 import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QProcess, QSettings, QTimer
+from PySide6.QtCore import QDate, QProcess, QSettings, QTimer
 from PySide6.QtGui import QFont, QRawFont
 from PySide6.QtWidgets import QApplication
 from moopython.research import load_rules
@@ -110,17 +110,22 @@ class ResearchUiTests(unittest.TestCase):
         result = self.result(); result['input_dataset'] = self.dataset
         self.window.display(result)
         members = set(result['report']['ranked_codes'])
-        self.window.ranking_mode.setCurrentIndex(self.window.ranking_mode.findData('risk'))
-        deadline = time.monotonic()+15
-        while self.window.process is not None and time.monotonic() < deadline:
-            self.app.processEvents(); time.sleep(.01)
-        self.assertIsNone(self.window.process)
-        report = self.window.results['put']['report']
-        self.assertEqual(set(report['ranked_codes']), members)
-        self.assertEqual(report['collected_at'], self.dataset['collected_at'])
-        self.assertEqual(report['sort_order'][0], ['risk_score', 'asc'])
+        for mode in ('risk', 'duration', 'cost', 'return', 'balanced'):
+            with self.subTest(mode=mode):
+                self.window.ranking_mode.setCurrentIndex(self.window.ranking_mode.findData(mode))
+                deadline = time.monotonic()+15
+                while self.window.process is not None and time.monotonic() < deadline:
+                    self.app.processEvents(); time.sleep(.01)
+                self.assertIsNone(self.window.process)
+                report = self.window.results['put']['report']
+                self.assertEqual(set(report['ranked_codes']), members)
+                self.assertEqual(report['collected_at'], self.dataset['collected_at'])
+                expected = [list(item) for item in load_rules().RANKING_SORT_ORDERS[mode]]
+                self.assertEqual(report['sort_order'], expected)
         self.assertIn('风险分↓', self.window.put_result.toPlainText())
         self.assertIn('Top 10', self.window.put_result.toPlainText())
+        self.assertIn('到期 / 天数', self.window.put_result.toPlainText())
+        self.assertIn('行权价 / 成本', self.window.put_result.toPlainText())
 
     def test_score_editor_changes_scoring_without_touching_filters_or_sort(self):
         dialog = FilterSortDialog(self.window.configuration, parent=self.window)
@@ -134,6 +139,60 @@ class ResearchUiTests(unittest.TestCase):
             dialog.restore_scoring()
             self.assertEqual(dialog.configuration()['scoring'], before['scoring'])
         finally: dialog.close()
+
+    def test_top_five_ten_twenty_reuses_the_entire_dataset_without_refetch(self):
+        self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        for index in range(1, 25):
+            self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code=f'US.TEST-{index}',
+                strike=90-index*.5, snapshot_strike=90-index*.5))
+        result = self.result(); result['input_dataset'] = self.dataset
+        self.window.display(result)
+        for count in (5, 20, 10):
+            with self.subTest(count=count):
+                self.window.top_count.setCurrentIndex(self.window.top_count.findData(count))
+                deadline = time.monotonic()+15
+                while self.window.process is not None and time.monotonic() < deadline:
+                    self.app.processEvents(); time.sleep(.01)
+                self.assertIsNone(self.window.process)
+                report = self.window.results['put']['report']
+                self.assertEqual(len(report['recommendations']), count)
+                self.assertEqual(report['qualified_count'], 25)
+                self.assertEqual([r['code'] for r in report['recommendations']], report['ranked_codes'][:count])
+                self.assertEqual(self.window.put_dataset, self.dataset)
+                self.assertIn(f'Top {count}', self.window.put_result.toPlainText())
+                self.assertEqual(int(self.window.settings.value('put_top_n')), count)
+
+    def test_combined_cost_return_risk_date_filters_then_top_ten_offline(self):
+        self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        for index in range(1, 25):
+            self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code=f'US.TEST-BOUNDS-{index}',
+                strike=90-index*.5, snapshot_strike=90-index*.5))
+        result = self.result(); result['input_dataset'] = self.dataset
+        self.window.display(result)
+        dialog = FilterSortDialog(self.window.configuration, parent=self.window)
+        try:
+            for rid, value in [('min-cost', 8000), ('max-cost', 8800), ('min-daily-return', .01), ('max-risk', 90)]:
+                check, field = dialog.controls[('filters', rid)]; check.setChecked(True); field.setValue(value)
+            check, field = dialog.controls[('filters', 'expiry-before')]
+            check.setChecked(True); field.setDate(QDate(2026, 11, 21))
+            configuration = dialog.configuration()
+            self.assertEqual(configuration['filters']['expiry-before']['threshold'], '2026-11-21')
+            dialog.restore_filters()
+            self.assertIsNone(dialog.configuration()['filters']['expiry-before']['threshold'])
+        finally: dialog.close()
+        self.window.apply_configuration(configuration)
+        deadline = time.monotonic()+15
+        while self.window.process is not None and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.01)
+        self.assertIsNone(self.window.process)
+        report = self.window.results['put']['report']
+        self.assertEqual(report['qualified_count'], 15)
+        self.assertEqual(len(report['recommendations']), 10)
+        for row in report['recommendations']:
+            self.assertTrue(8000 < row['cash_collateral'] < 8800)
+            self.assertGreater(row['daily_gross_return_pct'], .01)
+            self.assertLess(row['risk_score'], 90)
+            self.assertLess(row['expiration'], '2026-11-21')
 
     def test_single_best_put_risks_and_symbol_change_clears_both_results(self):
         result = self.result(); self.window.display(result)

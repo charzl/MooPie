@@ -36,13 +36,26 @@ with tempfile.TemporaryDirectory(prefix='moomoo frozen research ') as directory:
     source.write_text(json.dumps(dataset), encoding='utf-8')
     config.write_text(json.dumps(dict(sort_order=[['composite_score', 'desc']],
         scoring=dict(parameters=dict(return_weight=.3, stress_drop_pct=30)))), encoding='utf-8')
-    subprocess.run(command, check=True, timeout=60)
-    result = json.loads(output.read_text(encoding='utf-8'))
-    report = result['report']
-    assert len(report['recommendations']) == 10
-    assert [r['code'] for r in report['recommendations']] == report['ranked_codes'][:10]
-    assert report['configuration']['scoring']['parameters']['return_weight'] == .3
-    assert len(report['best_recommendation']['scoring']['components']) == 5
-    assert report['best_recommendation']['scoring']['missing_components'] == ['earnings']
-    assert all(0 <= r['risk_score'] <= 100 for r in report['recommendations'])
-print('Frozen filters, Top 10 scoring, sorting and offline data reuse passed.')
+    for count in (5, 10, 20):
+        subprocess.run([*command, '--top', str(count)], check=True, timeout=60)
+        result = json.loads(output.read_text(encoding='utf-8'))
+        report = result['report']
+        assert len(report['recommendations']) == min(count, len(dataset['contracts']))
+        assert [r['code'] for r in report['recommendations']] == report['ranked_codes'][:count]
+        assert report['configuration']['scoring']['parameters']['return_weight'] == .3
+        assert len(report['best_recommendation']['scoring']['components']) == 5
+        assert report['best_recommendation']['scoring']['missing_components'] == ['earnings']
+        assert all(0 <= r['risk_score'] <= 100 for r in report['recommendations'])
+        assert result['input_dataset'] == dataset
+    bounds = {'min-cost': 8500, 'max-cost': 9000, 'min-daily-return': .01,
+              'max-risk': 90, 'expiry-before': '2026-11-21'}
+    config.write_text(json.dumps(dict(filters={key: dict(enabled=True, threshold=value) for key, value in bounds.items()},
+                                     sort_order=[['cash_collateral', 'asc']])), encoding='utf-8')
+    subprocess.run([*command, '--top', '10'], check=True, timeout=60)
+    report = json.loads(output.read_text(encoding='utf-8'))['report']
+    assert report['qualified_count'] == 9 and len(report['recommendations']) == 9
+    for choice in report['recommendations']:
+        assert 8500 < choice['cash_collateral'] < 9000
+        assert choice['daily_gross_return_pct'] > .01 and choice['risk_score'] < 90
+        assert choice['expiration'] < '2026-11-21'
+print('Frozen combined filters, Top 5/10/20 scoring, sorting and offline data reuse passed.')

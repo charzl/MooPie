@@ -64,10 +64,11 @@ class ResearchTests(unittest.TestCase):
             root = Path(directory); source = root/'input data.json'; settings = root/'filters.json'; output = root/'result.json'
             source.write_text(json.dumps(self.dataset), encoding='utf-8'); settings.write_text(json.dumps(config))
             process = subprocess.run([sys.executable, '-m', 'moopython.research_cli', 'put', code,
-                '--input', str(source), '--config', str(settings), '--port', '1', '--output', str(output)], capture_output=True)
+                '--input', str(source), '--config', str(settings), '--top', '20', '--port', '1', '--output', str(output)], capture_output=True)
             self.assertEqual(process.returncode, 0, process.stderr)
             result = json.loads(output.read_text(encoding='utf-8'))
             self.assertEqual(result['report']['qualified_count'], 1)
+            self.assertEqual(result['report']['top_n_requested'], 20)
             self.assertEqual(result['collected_at'], self.dataset['collected_at'])
             self.assertEqual(result['input_dataset'], self.dataset)
         with self.assertRaisesRegex(ValueError, 'does not match'):

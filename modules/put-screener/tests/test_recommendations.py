@@ -107,5 +107,19 @@ class RecommendationTests(unittest.TestCase):
         self.assertEqual(custom['comparison_basis']['actual_sort_order'], [['cash_collateral', 'desc']])
         self.assertEqual(normal, rules.recommend(self.dataset))
 
+    def test_duration_and_cost_presets_choose_distinct_correct_leaders(self):
+        nearest = self.add(7, 85, .5)
+        cheapest = self.add(60, 70, .2)
+        base = rules.recommend(self.dataset)
+        for mode, expected in [('duration', nearest), ('cost', cheapest)]:
+            with self.subTest(mode=mode):
+                report = rules.recommend(self.dataset, configuration=dict(sort_order=rules.RANKING_SORT_ORDERS[mode]))
+                self.assertEqual(report['best_research_code'], expected['code'])
+                self.assertEqual(set(base['ranked_codes']), set(report['ranked_codes']))
+                self.assertEqual(report['ranking_views'][mode][0], expected['code'])
+                self.assertEqual(report['best_recommendation'][mode+'_rank'], 1)
+                for row in report['ranked']:
+                    self.assertEqual(row['metrics']['cash_collateral'], row['metrics']['strike']*100)
+
 
 if __name__ == '__main__': unittest.main()

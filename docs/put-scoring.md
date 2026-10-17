@@ -1,6 +1,46 @@
-# Put Top 10 与收益 / 风险评分
+# Put Top 5/10/20 与收益 / 风险评分
 
-先执行用户启用的 Filter，随后对所有通过者评分、排序，严格返回当前排序的前10份合约。不为分散到期日跳过更高名次，也不为凑满数量自动放宽边界。`--top` 可改变 CLI 返回数量，桌面默认10。收益、低风险和综合三种排序共用同一个候选集合。
+先对完整数据计算所需指标和分数，执行用户启用的Filter，再对通过者排序并截取所选Top 5/10/20，默认10。不为分散到期日跳过更高名次，也不为凑满数量自动放宽边界。Top数量只限制输出，不限制抓取和评分范围。到期时长、担保成本、收益、低风险和综合五种排序共用同一个完整候选集合。
+
+| 排序 | 默认方向 | 比较值 |
+| --- | --- | --- |
+| `duration` | 短到长 | 剩余到期自然日，对应到期日期从近到远 |
+| `cost` | 低到高 | 一张标准合约的全额担保现金：行权价×100 |
+| `return` | 高到低 | 未封顶的日均权利金毛收益率 |
+| `risk` | 低到高 | 下面定义的风险分 |
+| `balanced` | 高到低 | 下面定义的综合分 |
+
+同一时长或成本时比较日均收益率，再比较风险分。用户可以在Sort设置中自定义指标和升降序。
+
+## 组合过滤后再取Top
+
+Filter 页面优先展示下列可选条件。它们初始关闭，用户勾选、填写阈值后成为硬限制，所有已启用条件必须同时通过。
+
+| 配置ID | 条件 | 单位 / 边界 |
+| --- | --- | --- |
+| `min-cost` | 担保成本 > 下限 | 美元，行权价×100 |
+| `max-cost` | 担保成本 < 上限 | 美元；启用上下限时必须下限小于上限 |
+| `min-daily-return` | 日均毛收益率 > 门槛 | 百分数值；0.05代表0.05%/天 |
+| `max-risk` | 风险分 < 上限 | 0–100；风险分依赖当前评分模型 |
+| `expiry-before` | 到期日 < 截止日期 | `YYYY-MM-DD`，不包含截止日当天 |
+
+先对完整候选计算风险和收益，应用全部Filter，然后排序并截取Top 5/10/20。不会先取未过滤的Top10再从中删选，也不保证所有条件下都有10份。数量不足时不自动放宽。开启或调整风险分限制后，评分参数变化可能改变候选集合；参数与阈值都保留在结果中。
+
+组合配置示例（示例阈值，不是建议）：
+
+```json
+{
+  "filters": {
+    "min-cost": {"enabled": true, "threshold": 20000},
+    "max-cost": {"enabled": true, "threshold": 40000},
+    "min-daily-return": {"enabled": true, "threshold": 0.03},
+    "max-risk": {"enabled": true, "threshold": 75},
+    "expiry-before": {"enabled": true, "threshold": "2026-12-01"}
+  }
+}
+```
+
+保存为 `filters.json`，运行 `./moomoo analyze input.json --config filters.json --rank-by return --top 10 --output filtered.json`。日期按本次需求填写；重放旧数据时仍按输入数据的日期和报价计算。
 
 本版是 **可解释但尚未回测、校准的研究评分**，下面的权重和数值为原型参数，不是客观确定的风险或个人投资建议。风险分包括观测风险与缺失信息惩罚，不是亏损、行权或指派概率。
 
@@ -51,11 +91,13 @@
 ```sh
 ./moomoo analyze input.json --rank-by return --output returns.json
 ./moomoo analyze input.json --rank-by risk --output lower-risk.json
+./moomoo analyze input.json --rank-by duration --top 5 --output nearest.json
+./moomoo analyze input.json --rank-by cost --top 20 --output lowest-cost.json
 ./moomoo analyze input.json --rank-by balanced --top 10 --config scoring.json \
   --output balanced.json --csv-output balanced.csv
 ```
 
-`--rank-by` 覆盖该次运行的排序，不修改配置文件或 Filter。桌面主界面可选择三种排序；「Filter / Sort 设置」的「收益 / 风险评分」页修改权重和尺度，已有数据会离线重算。
+`--rank-by` 覆盖该次运行的排序，不修改配置文件或 Filter。桌面主界面选择五种排序及Top 5/10/20；「Filter / Sort 设置」的「收益 / 风险评分」页修改权重和尺度。已有数据时，切换排序或数量都会复用完整缓存离线重算，保留原采集时间，不请求OpenD。
 
 示例 `scoring.json`：
 
@@ -76,9 +118,9 @@
 
 未指定参数继承规则文件的默认值。全部定义在独立 `modules/put-screener/put_rules.py` 的 `RISK_WEIGHTS` / `SCORING_PARAMETERS`。新增维度需要修改同一文件并提高版本。抓取层和 MCP 无须重写；它们仍只提供数据。
 
-JSON 的 `recommendations` 严格对应 `ranked[:top_n]`；每项包含 `return_score`、`risk_score`、`composite_score`、三种独立排名和 `scoring.components` 的分数、权重、贡献、缺失状态及解释。`ranking_views` 提供三种预设排序的Top代码；完整候选仍在 `ranked`。`expiration_comparisons` 另存每个到期日的最优候选，不参与强制替换Top结果。CSV包含三种分数、情景亏损率、证据覆盖率和各风险子分。
+JSON 的 `recommendations` 严格对应 `ranked[:top_n]`；每项包含 `return_score`、`risk_score`、`composite_score`、五种独立排名和 `scoring.components` 的分数、权重、贡献、缺失状态及解释。`ranking_views` 提供五种预设排序的Top代码；完整候选仍在 `ranked`。`expiration_comparisons` 另存每个到期日的最优候选，不参与强制替换Top结果。CSV包含三种分数、情景亏损率、证据覆盖率和各风险子分。
 
-输入、实际配置和引擎指纹保留。调整评分只改变分数/顺序，不改变 Filter 或原始采集时间。支持 `--budget` 的全额接股现金硬限制；未提供预算就标为未检查，不猜测个人账户资金。
+输入、实际配置和引擎指纹保留。调整评分不修改Filter设置或原始采集时间；若启用了最高风险分Filter，分数变化也会影响是否入选。支持 `--budget` 的全额接股现金硬限制；未提供预算就标为未检查，不猜测个人账户资金。
 
 ## 当前边界与以后验证
 

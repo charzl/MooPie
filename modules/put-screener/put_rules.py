@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 
 ENGINE_VERSION = '0.5.0'
-RULESET_VERSION = '4.0.0'
+RULESET_VERSION = '4.1.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # These remain available as optional hard filters. Oversold is not a buy signal.
 TREND_RULES = [
@@ -44,11 +44,20 @@ RULES = [
     ('earnings-checked', 'earnings_known', '==', 1),
     ('earnings-buffer', 'days_expiry_before_earnings', '>=', 3),
     ('underlying-trend', 'trend_allowed', '==', 1),
+    ('min-cost', 'cash_collateral', '>', 0),
+    ('max-cost', 'cash_collateral', '<', 100000),
+    ('min-daily-return', 'daily_gross_return_pct', '>', .05),
+    ('max-risk', 'risk_score', '<', 50),
+    ('expiry-before', 'expiration', '<', None),
 ]
+# User-supplied bounds are opt-in in both recommendation and legacy scan modes.
+OPTIONAL_SELECTION_FILTERS = frozenset(('min-cost', 'max-cost', 'min-daily-return', 'max-risk', 'expiry-before'))
 # Among survivors, maximize daily gross premium on full strike cash collateral;
 # ties favor tighter spreads / lower delta.
 SORT_ORDER = [('daily_gross_return_pct', 'desc'), ('spread_pct_of_mid', 'asc'), ('abs_delta', 'asc')]
 RANKING_SORT_ORDERS = {
+    'duration': [('days_to_expiry', 'asc'), ('daily_gross_return_pct', 'desc'), ('risk_score', 'asc')],
+    'cost': [('cash_collateral', 'asc'), ('daily_gross_return_pct', 'desc'), ('risk_score', 'asc')],
     'return': [('daily_gross_return_pct', 'desc'), ('risk_score', 'asc'), ('spread_pct_of_mid', 'asc')],
     'risk': [('risk_score', 'asc'), ('daily_gross_return_pct', 'desc'), ('spread_pct_of_mid', 'asc')],
     'balanced': [('composite_score', 'desc'), ('daily_gross_return_pct', 'desc'), ('risk_score', 'asc')],
@@ -75,7 +84,7 @@ OPS = {'>': operator.gt, '>=': operator.ge, '<': operator.lt,
        '<=': operator.le, '==': operator.eq}
 NY = ZoneInfo('America/New_York')
 METRICS = frozenset(('bid', 'ask', 'shares', 'strike', 'underlying_price', 'days_to_expiry',
-    'risk_score', 'return_score', 'composite_score', 'stress_loss_pct',
+    'risk_score', 'return_score', 'composite_score', 'stress_loss_pct', 'expiration',
     'abs_delta', 'iv_pct', 'volume', 'open_interest', 'bid_size', 'spread_pct_of_mid', 'otm_pct',
     'breakeven_before_costs', 'breakeven_buffer_pct', 'premium_per_contract_before_costs',
     'cash_collateral', 'gross_return_pct', 'daily_gross_return_pct', 'annualized_gross_return_pct', 'max_profit_before_costs',
@@ -87,7 +96,7 @@ TREND_METRICS = frozenset(('distance_to_ma50_pct', 'ma50_slope_5d_pct', 'breakdo
 EARNINGS_RULES = frozenset(('earnings-checked', 'earnings-buffer'))
 # Supported-contract boundaries, shown separately from optional strategy filters.
 REQUIRED_FILTERS = frozenset(('standard-contract', 'not-suspended'))
-SORTABLE_METRICS = METRICS - {'iv_pct', 'days_expiry_before_earnings', 'strike_below_20d_low_atr'}
+SORTABLE_METRICS = METRICS - {'iv_pct', 'days_expiry_before_earnings', 'strike_below_20d_low_atr', 'expiration'}
 # Illustrative basic boundaries, not a statement of any user's risk tolerance.
 # Preferences such as RSI, momentum, minimum OI and minimum Delta are not vetoes.
 RECOMMENDATION_BOUNDARIES = {
@@ -119,7 +128,9 @@ def recommendation_configuration(configuration=None):
 
 def default_configuration():
     return dict(schema=1,
-        filters={rid: dict(enabled=True, threshold=float(threshold)) for rid, _, _, threshold in RULES},
+        filters={rid: dict(enabled=rid not in OPTIONAL_SELECTION_FILTERS,
+                          threshold=threshold if metric == 'expiration' else float(threshold))
+                 for rid, metric, _, threshold in RULES},
         trend_filters={rid: dict(enabled=True, threshold=float(threshold)) for rid, _, _, threshold in TREND_RULES},
         sort_order=[list(item) for item in SORT_ORDER],
         scoring=dict(weights=dict(RISK_WEIGHTS), parameters={key: value[0] for key, value in SCORING_PARAMETERS.items()}))
@@ -157,13 +168,17 @@ def resolve_configuration(configuration=None):
                 raise ValueError('Invalid filter options: ' + rid)
             chosen = dict(result[group][rid], **options)
             if type(chosen['enabled']) is not bool: raise ValueError('Filter enabled must be boolean: ' + rid)
-            finite(chosen['threshold'], rid)
-            chosen['threshold'] = float(chosen['threshold'])
-            if group == 'filters' and rid in REQUIRED_FILTERS and chosen != result[group][rid]:
-                raise ValueError('Required supported-contract check cannot be disabled or changed: ' + rid)
             source = RULES if group == 'filters' else TREND_RULES
             metric = next(metric for key, metric, _, _ in source if key == rid)
-            if group == 'filters' and chosen['threshold'] < 0:
+            if metric == 'expiration':
+                if chosen['threshold'] is not None or chosen['enabled']:
+                    iso_date(chosen['threshold'])
+            else:
+                finite(chosen['threshold'], rid)
+                chosen['threshold'] = float(chosen['threshold'])
+            if group == 'filters' and rid in REQUIRED_FILTERS and chosen != result[group][rid]:
+                raise ValueError('Required supported-contract check cannot be disabled or changed: ' + rid)
+            if group == 'filters' and metric != 'expiration' and chosen['threshold'] < 0:
                 raise ValueError('Filter threshold cannot be negative: ' + rid)
             if metric == 'abs_delta' and not 0 <= chosen['threshold'] <= 1:
                 raise ValueError('Delta threshold must be 0–1')
@@ -171,11 +186,16 @@ def resolve_configuration(configuration=None):
                 raise ValueError('Boolean filter threshold must be 0 or 1: ' + rid)
             if metric == 'rsi14' and not 0 <= chosen['threshold'] <= 100:
                 raise ValueError('RSI threshold must be 0–100')
+            if metric == 'risk_score' and not 0 <= chosen['threshold'] <= 100:
+                raise ValueError('Risk threshold must be 0–100')
             result[group][rid] = chosen
     for minimum, maximum in (('min-days', 'max-days'), ('min-delta', 'max-delta')):
         lower, upper = result['filters'].get(minimum), result['filters'].get(maximum)
         if lower and upper and lower['enabled'] and upper['enabled'] and lower['threshold'] > upper['threshold']:
             raise ValueError('Minimum filter exceeds maximum: ' + minimum)
+    lower, upper = result['filters'].get('min-cost'), result['filters'].get('max-cost')
+    if lower and upper and lower['enabled'] and upper['enabled'] and lower['threshold'] >= upper['threshold']:
+        raise ValueError('Minimum filter exceeds maximum: min-cost (strict cost bounds must differ)')
     if 'sort_order' in configuration:
         order = configuration['sort_order']
         if not isinstance(order, list) or not order: raise ValueError('At least one sort metric is required')
@@ -384,7 +404,7 @@ def metrics(row, session_date, collected_at):
         if iv == 0: iv = None  # Broker's unavailable-IV sentinel; IV is optional.
         elif iv < 0: raise ValueError('Invalid implied volatility')
     return dict(
-        bid=bid, ask=ask, shares=int(shares), strike=strike, underlying_price=spot,
+        bid=bid, ask=ask, shares=int(shares), strike=strike, underlying_price=spot, expiration=expiry.isoformat(),
         days_to_expiry=dte, abs_delta=abs(delta), iv_pct=iv, **liquidity,
         spread_pct_of_mid=100 * (ask - bid) / mid,
         otm_pct=100 * (spot - strike) / spot,
@@ -410,7 +430,9 @@ def validate_rules():
     for rule_id, metric, op, threshold in RULES:
         if rule_id in seen or op not in OPS: raise ValueError('Duplicate rule ID or invalid operator')
         seen.add(rule_id)
-        finite(threshold, 'Rule threshold')
+        if metric == 'expiration':
+            if threshold is not None: iso_date(threshold)
+        else: finite(threshold, 'Rule threshold')
         if metric not in METRICS: raise ValueError('Unknown rule metric: ' + str(metric))
     if not RULES: raise ValueError('At least one rule is required')
     trend_ids = set()
@@ -648,6 +670,7 @@ def recommend(dataset, budget=None, configuration=None, top_n=10):
             gross_return_pct=m['gross_return_pct'], annualized_gross_return_pct=m['annualized_gross_return_pct'],
             return_score=m['return_score'], risk_score=m['risk_score'], composite_score=m['composite_score'],
             return_rank=row['return_rank'], risk_rank=row['risk_rank'], balanced_rank=row['balanced_rank'],
+            duration_rank=row['duration_rank'], cost_rank=row['cost_rank'],
             scoring=row['scoring'],
             breakeven_before_costs=m['breakeven_before_costs'], max_loss_before_costs=m['max_loss_before_costs'],
             reasons=reasons, tradeoffs=comparisons, risk_notes=notes, scenarios=scenarios,
@@ -683,7 +706,7 @@ def main(argv=None):
     parser.add_argument('--config', type=Path, help='JSON with explicit filter toggles/thresholds and independent sort_order')
     parser.add_argument('--csv-output', type=Path, help='Export qualified candidates and the separate earnings-unverified watchlist')
     parser.add_argument('--top', type=int, default=10)
-    parser.add_argument('--rank-by', choices=RANKING_SORT_ORDERS, help='Override sorting: return, risk or balanced; filters remain unchanged')
+    parser.add_argument('--rank-by', choices=RANKING_SORT_ORDERS, help='Override sorting: duration, cost, return, risk or balanced; filters remain unchanged')
     parser.add_argument('--scan-only', action='store_true', help='Use the legacy full-filter scan without date/strike recommendations')
     args = parser.parse_args(argv)
     try:

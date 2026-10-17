@@ -1,9 +1,10 @@
 """User-selected strategy filters and a separate lexicographic sort editor."""
 import copy
+from PySide6.QtCore import QDate
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
     QWidget, QScrollArea, QCheckBox, QDoubleSpinBox, QComboBox, QPushButton,
-    QDialogButtonBox, QMessageBox)
+    QDialogButtonBox, QMessageBox, QDateEdit)
 
 from .research import load_rules
 from .research_explanation import METRICS, FLAGS, value_text
@@ -36,6 +37,8 @@ class FilterSortDialog(QDialog):
         impacts = {item['id']: item for item in (report or {}).get('filter_impact', [])}
         for group, source, heading in [('filters', self.engine.RULES, '合约 Filter'),
                                        ('trend_filters', self.engine.TREND_RULES, '趋势 Filter（由“标的通过全部趋势检查”开关控制）')]:
+            if group == 'filters':
+                source = sorted(source, key=lambda rule: rule[0] not in self.engine.OPTIONAL_SELECTION_FILTERS)
             title = QLabel(heading); title.setStyleSheet('font-weight:bold;padding-top:12px;'); filters.addWidget(title)
             for rid, metric, op, _ in source:
                 if rid in self.engine.REQUIRED_FILTERS: continue
@@ -45,13 +48,21 @@ class FilterSortDialog(QDialog):
                 chosen = self.initial[group][rid]
                 check.setChecked(chosen['enabled']); row.addWidget(check, 1)
                 field = None
-                if metric not in FLAGS:
+                if metric == 'expiration':
+                    field = QDateEdit(); field.setCalendarPopup(True); field.setDisplayFormat('yyyy-MM-dd')
+                    field.setDate(QDate.fromString(chosen['threshold'], 'yyyy-MM-dd')
+                                  if chosen['threshold'] else QDate.currentDate().addMonths(3))
+                    field.setEnabled(chosen['enabled']); check.toggled.connect(field.setEnabled); row.addWidget(field)
+                elif metric not in FLAGS:
                     field = QDoubleSpinBox(); field.setDecimals(4)
                     if metric in ('days_to_expiry', 'volume', 'open_interest', 'bid_size'): field.setDecimals(0)
                     elif metric != 'macd_histogram_change': field.setDecimals(2)
                     field.setRange(-1_000_000_000 if group == 'trend_filters' else 0, 1_000_000_000)
                     if metric == 'abs_delta': field.setRange(0, 1); field.setSingleStep(.05)
                     if metric == 'rsi14': field.setRange(0, 100)
+                    if metric == 'risk_score': field.setRange(0, 100)
+                    if metric == 'cash_collateral': field.setPrefix('$')
+                    if metric == 'daily_gross_return_pct': field.setDecimals(4); field.setSingleStep(.01)
                     field.setValue(chosen['threshold']); field.setEnabled(chosen['enabled'])
                     if metric.endswith('_pct') or metric == 'spread_pct_of_mid': field.setSuffix('%')
                     check.toggled.connect(field.setEnabled); row.addWidget(field)
@@ -63,7 +74,7 @@ class FilterSortDialog(QDialog):
                     row.addWidget(count)
                 self.controls[(group, rid)] = (check, field)
                 filters.addLayout(row)
-        note = QLabel('财报未知时，“财报日期已知”和“到期早于财报的天数”都会未通过。若决定允许未知财报，需同时关闭这两项；风险提示仍保留。')
+        note = QLabel('成本上下限、最低日均毛收益率、最高风险分和到期截止日可组合启用；先过滤完整数据，再取Top数量。< / > 为严格不等式，到期截止日不含当天。收益门槛以百分数输入，例如0.05表示0.05%/天。财报未知时，启用的财报条件无法通过；关闭后仍保留风险提示。')
         note.setWordWrap(True); filters.addWidget(note)
         filters.addStretch()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(page)
@@ -90,7 +101,7 @@ class FilterSortDialog(QDialog):
             self.sort_controls.append((metric, direction))
         sort_layout.addStretch(); tabs.addTab(sorting, 'Sort 排序')
         score_page = QWidget(); score_layout = QVBoxLayout(score_page)
-        note = QLabel('风险分0–100，越高越危险；收益分和综合分越高越好。以下为待验证的研究参数，不代表亏损概率。风险总权重会自动归一化；缺失信息有单独惩罚。改变评分不改变 Filter。')
+        note = QLabel('风险分0–100，越高越危险；收益分和综合分越高越好。以下为待验证的研究参数，不代表亏损概率。权重自动归一化，缺失信息有单独惩罚。修改评分不更改 Filter 设置；启用最高风险分限制时，评分变化会影响是否通过。')
         note.setWordWrap(True); score_layout.addWidget(note)
         restore = QPushButton('恢复示例评分参数'); restore.clicked.connect(self.restore_scoring)
         score_layout.addWidget(restore)
@@ -125,13 +136,19 @@ class FilterSortDialog(QDialog):
         defaults = self.engine.recommendation_configuration()
         for (group, rid), (check, field) in self.controls.items():
             check.setChecked(defaults[group][rid]['enabled'])
-            if field: field.setValue(defaults[group][rid]['threshold'])
+            if isinstance(field, QDateEdit):
+                value = defaults[group][rid]['threshold']
+                self.initial[group][rid]['threshold'] = value
+                field.setDate(QDate.fromString(value, 'yyyy-MM-dd') if value else QDate.currentDate().addMonths(3))
+            elif field: field.setValue(defaults[group][rid]['threshold'])
 
     def configuration(self):
         result = copy.deepcopy(self.initial)
         for (group, rid), (check, field) in self.controls.items():
             result[group][rid]['enabled'] = check.isChecked()
-            if field: result[group][rid]['threshold'] = field.value()
+            if isinstance(field, QDateEdit):
+                if check.isChecked(): result[group][rid]['threshold'] = field.date().toString('yyyy-MM-dd')
+            elif field: result[group][rid]['threshold'] = field.value()
         result['sort_order'] = [[metric.currentData(), direction.currentData()]
                                 for metric, direction in self.sort_controls if metric.currentData() is not None]
         for (group, key), field in self.score_controls.items(): result['scoring'][group][key] = field.value()

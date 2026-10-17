@@ -90,11 +90,20 @@ class ResearchWindow(QMainWindow):
         hint = QLabel('美股 · 未来三个月期权 · 现金担保 Put'); hint.setObjectName('muted')
         settings_row.addWidget(hint); settings_row.addStretch()
         self.ranking_mode = QComboBox()
-        for label, key in [('收益优先', 'return'), ('低风险优先', 'risk'), ('收益 / 风险综合', 'balanced'), ('自定义排序', 'custom')]:
+        for label, key in [('收益优先', 'return'), ('低风险优先', 'risk'), ('到期时长：短到长', 'duration'),
+                           ('担保成本：低到高', 'cost'), ('收益 / 风险综合', 'balanced'), ('自定义排序', 'custom')]:
             self.ranking_mode.addItem(label, key)
         self.sync_ranking_mode()
         self.ranking_mode.currentIndexChanged.connect(self.change_ranking_mode)
         settings_row.addWidget(self.ranking_mode)
+        settings_row.addWidget(QLabel('Top'))
+        self.top_count = QComboBox()
+        for count in (5, 10, 20): self.top_count.addItem(str(count), count)
+        try: saved_count = int(self.settings.value('put_top_n', 10))
+        except (ValueError, TypeError): saved_count = 10
+        self.top_count.setCurrentIndex(self.top_count.findData(saved_count if saved_count in (5, 10, 20) else 10))
+        self.top_count.currentIndexChanged.connect(self.change_top_count)
+        settings_row.addWidget(self.top_count)
         self.rules_button = QPushButton('Filter / Sort 设置')
         self.rules_button.clicked.connect(self.show_rules)
         settings_row.addWidget(self.rules_button)
@@ -123,12 +132,12 @@ class ResearchWindow(QMainWindow):
     def reset_panels(self):
         self.results.clear()
         self.put_dataset = None
-        self.put_result.setHtml('<h2>卖出 Put · Top 10</h2><p>先按 Filter 过滤，再按收益、低风险或综合得分排序。</p><p style="color:#9aaab7">评分参数可在设置中调整；没有候选时，查看原因后自行调整 Filter。</p>')
+        self.put_result.setHtml(f'<h2>卖出 Put · Top {self.top_count.currentData()}</h2><p>先按 Filter 过滤，再按到期时长、担保成本、收益、风险或综合得分排序。</p><p style="color:#9aaab7">设置页可调整排序方向和评分参数；没有候选时查看原因再调整 Filter。</p>')
         self.trend_result.setHtml('<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>')
         if hasattr(self, 'export_button'): self.export_button.setEnabled(False)
 
     def busy(self, value):
-        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.rules_button, self.ranking_mode): control.setEnabled(not value)
+        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.rules_button, self.ranking_mode, self.top_count): control.setEnabled(not value)
         self.cancel_button.setVisible(value)
 
     def start(self, action, reuse=False):
@@ -163,7 +172,7 @@ class ResearchWindow(QMainWindow):
         if action == 'put':
             config_path = Path(self.workspace.name) / 'configuration.json'
             config_path.write_text(json.dumps(self.configuration, allow_nan=False), encoding='utf-8')
-            extra += ['--config', str(config_path)]
+            extra += ['--config', str(config_path), '--top', str(self.top_count.currentData())]
             if dataset is not None:
                 dataset_path = Path(self.workspace.name) / 'dataset.json'
                 dataset_path.write_text(json.dumps(dataset, allow_nan=False), encoding='utf-8')
@@ -233,6 +242,11 @@ class ResearchWindow(QMainWindow):
             self.put_dataset = result.get('input_dataset')
             self.configuration = report.get('configuration', self.configuration)
             self.sync_ranking_mode()
+            requested = report.get('top_n_requested', 10)
+            if requested in (5, 10, 20):
+                self.top_count.blockSignals(True)
+                self.top_count.setCurrentIndex(self.top_count.findData(requested))
+                self.top_count.blockSignals(False)
             content = f'<p>检查 {report["total_contracts"]} 个合约，{report["qualified_count"]} 个通过当前 Filter。</p>'
             content += '<p>Sort：' + esc(sort_description(report['sort_order'])) + '</p>'
             if ranked:
@@ -243,6 +257,7 @@ class ResearchWindow(QMainWindow):
                           ('每张权利金（费用前）', f'${m["premium_per_contract_before_costs"]:,.2f}'),
                           ('现金担保要求', f'${m["cash_collateral"]:,.2f}'),
                           ('日均毛收益率（完整保留权利金）', f'{m["daily_gross_return_pct"]:.4f}%'),
+                          ('收益分 / 风险分 / 综合分', f'{m["return_score"]:.2f} / {m["risk_score"]:.2f} / {m["composite_score"]:.2f}'),
                           ('权利金 / 本金 · 简单年化', f'{m["gross_return_pct"]:.2f}% / {m["annualized_gross_return_pct"]:.2f}%'),
                           ('盈亏平衡价', f'${m["breakeven_before_costs"]:.2f}'),
                           ('价外幅度 / Delta', f'{m["otm_pct"]:.2f}% / {-m["abs_delta"]:.2f}'),
@@ -276,6 +291,7 @@ class ResearchWindow(QMainWindow):
     def sync_ranking_mode(self):
         primary, direction = self.configuration['sort_order'][0]
         key = {('daily_gross_return_pct', 'desc'): 'return', ('risk_score', 'asc'): 'risk',
+               ('days_to_expiry', 'asc'): 'duration', ('cash_collateral', 'asc'): 'cost',
                ('composite_score', 'desc'): 'balanced'}.get((primary, direction), 'custom')
         self.ranking_mode.blockSignals(True)
         self.ranking_mode.setCurrentIndex(self.ranking_mode.findData(key))
@@ -289,6 +305,10 @@ class ResearchWindow(QMainWindow):
         config['sort_order'] = [list(item) for item in load_rules().RANKING_SORT_ORDERS[key]]
         self.apply_configuration(config)
 
+    def change_top_count(self, _index):
+        self.settings.setValue('put_top_n', self.top_count.currentData())
+        self.apply_configuration(self.configuration)
+
     def apply_configuration(self, configuration):
         self.configuration = configuration
         self.sync_ranking_mode()
@@ -296,7 +316,7 @@ class ResearchWindow(QMainWindow):
         if self.put_dataset is not None: self.start('put', reuse=True)
         else:
             self.results.pop('put', None)
-            self.put_result.setPlainText('Filter / Sort 已保存。点击“筛选卖出 Put”抓取并分析。')
+            self.put_result.setPlainText(f'研究设置已保存：Top {self.top_count.currentData()}。点击“筛选卖出 Put”抓取并分析。')
             self.export_button.setEnabled(bool(self.results))
             self.status.setText('设置已保存；尚未重新抓取行情。')
 

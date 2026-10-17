@@ -14,6 +14,7 @@ METRICS = {
     'macd_histogram_change': 'MACD 柱较前日变化', 'cash_collateral': '现金担保（美元）',
     'annualized_gross_return_pct': '现金担保权利金简单年化',
     'daily_gross_return_pct': '日均权利金毛收益率',
+    'expiration': '到期日',
     'return_score': '收益分', 'risk_score': '风险分（越低越好）', 'composite_score': '综合分',
     'gross_return_pct': '权利金 / 担保本金',
     'premium_per_contract_before_costs': '每张权利金（费用前）',
@@ -45,7 +46,7 @@ def condition_text(rule):
 def table(headers, rows):
     head = ''.join(f'<th align="left">{escape(str(h))}</th>' for h in headers)
     body = ''.join('<tr>' + ''.join('<td>' + escape(str(v)).replace('\n', '<br>') + '</td>' for v in row) + '</tr>' for row in rows)
-    return f'<table width="100%" cellpadding="5" cellspacing="0"><tr>{head}</tr>{body}</table>'
+    return f'<table width="98%" cellpadding="5" cellspacing="0"><tr>{head}</tr>{body}</table>'
 
 
 def rules_html(config):
@@ -75,12 +76,12 @@ def recommendations_html(report):
     if not choices: return ''
     content = f'<h3>Top {report.get("top_n_requested", 10)} · 规则引擎的到期日 / 行权价比较</h3>'
     if len(choices) < report.get('top_n_requested', 10): content += f'<p>风险边界内只有 {len(choices)} 份合约，返回实际数量。</p>'
-    content += table(['排名', '到期 / 行权价', '日均毛收益率', '收益分', '风险分↓', '综合分↑'],
-        [[c['overall_rank'], f"{c['expiration']}\n${c['strike']:,.2f}",
-          f"{c['daily_gross_return_pct']:.4f}%", f"{c['return_score']:.2f}",
+    content += table(['排名', '到期 / 天数', '行权价 / 成本', '日均毛收益率', '风险分↓', '综合分↑'],
+        [[c['overall_rank'], f"{c['expiration']}\n{c['days_to_expiry']} 天",
+          f"${c['strike']:,.2f}\n${c['cash_collateral']:,.0f}", f"{c['daily_gross_return_pct']:.4f}%",
           f"{c['risk_score']:.2f}", f"{c['composite_score']:.2f}"] for c in choices])
     p = report['configuration']['scoring']['parameters']
-    content += f'<p>收益分 = min(100, 日均毛收益率 / {p["daily_return_target_pct"]:g}% ×100)。综合分 = {100*p["return_weight"]:g}% ×收益分 + {100*(1-p["return_weight"]):g}% ×(100−风险分)。评分参数为研究示例，未回测校准。</p>'
+    content += f'<p>担保成本 = 行权价 ×100股。收益分 = min(100, 日均毛收益率 / {p["daily_return_target_pct"]:g}% ×100)。综合分 = {100*p["return_weight"]:g}% ×收益分 + {100*(1-p["return_weight"]):g}% ×(100−风险分)。评分参数为研究示例，未回测校准。</p>'
     content += '<p>日均毛收益率 = 权利金 ÷ 担保本金 ÷ 剩余自然日 × 100%。假设完整保留权利金；不是实际每天到账的收益，股价下跌可产生亏损。</p>'
     return content
 
