@@ -8,10 +8,10 @@
 
 需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。macOS 缺少 uv 时运行 `brew install uv`；Windows 用 `winget install --id=astral-sh.uv -e`，安装后重开终端。脚本会准备 Python **3.14**，无需自己激活虚拟环境。
 
-当前研究桌面功能位于 `codex/research-desktop` 分支，首次下载对应版本：
+当前可配置 Filter / Sort 功能位于 `codex/configurable-put-filters` 分支，首次下载对应版本：
 
 ```sh
-git clone --branch codex/research-desktop https://github.com/charzl/moomoo-clients.git
+git clone --branch codex/configurable-put-filters https://github.com/charzl/moomoo-clients.git
 cd moomoo-clients
 ./setup.sh
 ```
@@ -73,7 +73,7 @@ mkdir -p artifacts/options
   --csv-output artifacts/put-screen/ranking.csv
 ```
 
-抓取联网，分析离线。结果保存为 JSON/CSV；`ranked` 是全部规则通过的合约，`underlyings` 有 MA、RSI、MACD、ATR 和趋势证据，`failed_rules` 说明排除原因。未知财报的观察名单不属于合格名单，筛选结果为空也是有效结果。
+抓取联网，分析离线。结果保存为 JSON/CSV；`ranked` 是基础数据有效且通过全部已启用 Filter 的合约，`underlyings` 有 MA、RSI、MACD、ATR 和趋势证据，`failed_rules` 说明排除原因。默认财报未知会被拦截；用户明确关闭两项财报 Filter 后可留下，但仍显示未验证提示。
 
 修改 [put_rules.py](modules/put-screener/put_rules.py) 后，可对同一个输入重新分析，无需重新抓取或打包。可传 `--budget 25000` 限制一份合约的接股现金。规则是待验证的研究条件，不代表已经回测的收益优势或未来涨跌概率。详见[规则说明](modules/put-screener/README.md)。
 
@@ -147,12 +147,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
 
 输入股票代码，选择一个功能：
 
-- **筛选卖出 Put**：抓取未来三个月合约、报价、日线和财报。通过全部风险条件后，返回规则排名第一的合约，显示到期日、行权价、Bid/Ask、权利金、担保现金、年化比较值、盈亏平衡和最大亏损。当前规则限定 21–60 天到期。没有合格候选就说明未通过的条件；财报未知时不自动放行。
+- **筛选卖出 Put**：抓取未来三个月合约、报价、日线和财报。按用户选择的 Filter 过滤，再按独立 Sort 排序，展示第一名的到期日、行权价、Bid/Ask、权利金、担保现金、盈亏平衡和最大亏损，并列出前10名候选。默认期限为21–60天，可自行修改或关闭该条件。
 - **分析走势**：用已完成日线计算 MA20/50/200、RSI、MACD 和成交量，展示未来 5–20 个交易日的条件判断、关键价位及改判依据。它不是盘中预测或涨跌概率模型。
 
 两个结果均标注股票、数据时间，可导出完整 JSON。查询在独立进程运行，可以取消；输入另一只股票会清空旧结果。默认连接本机 OpenD，界面可改端口。无需配置 MCP 或外部 AI API Key。
 
-点「筛选条件」可在查询前查看当前实际阈值。查询后，Put 面板逐项显示趋势的实际值、阈值与通过情况，以及每条合约条件排除了多少份合约；数据无效和规则未通过分开解释，各项数量可能重叠。IV=0 作为未知展示，IV 不参与当前排序；Bid/Ask、Delta 和趋势等必要数据仍须有效。
+点「Filter / Sort 设置」：
+
+- **Filter 页面**：勾选条件、调整阈值。可关闭整个趋势 Filter，或调整其中的 MA50、RSI、MACD 条件。财报未知时，需要同时关闭“已知财报日”和“财报间隔”两项才能允许未知财报的合约。也可显式点击“关闭全部可选 Filter”，再逐项勾选自己需要的条件。标准100股、未停牌和必要基础数据检查始终保留。
+- **Sort 页面**：独立选择最多三项排序指标及升降序。默认简单年化从高到低，再比较价差与绝对 Delta。改变 Sort 不改变候选名单。
+- **没有结果**：面板显示实际指标、阈值、排除数量，以及关闭单项或趋势/财报组合后的候选数量预览。预览不自动应用条件；各项排除数量可能重叠。
+- **调整后重跑**：已有数据时，点击“应用并重新筛选（已有数据）”离线重算，不重新请求 OpenD；结果保留原始采集时间。点击主界面“筛选卖出 Put”才刷新行情。更换股票或端口会清空缓存。设置会保留到下次打开。
+
+关闭 Filter 不会消除风险：财报未知、默认趋势未通过和历史数据不可验证等提示仍保留。IV=0 作为未知展示，不参与当前排序；无效报价、Delta 或身份不一致等基础问题不会因关闭 Filter 而放行。
+
+CLI 同样支持配置文件：`./moomoo analyze input.json --config filters.json --output ranking.json`，格式见[独立规则说明](modules/put-screener/README.md)。导出桌面 JSON 会保留原始输入、实际 Filter / Sort 配置与逐合约证据。
 
 Put 排序依据保留在 [put_rules.py](modules/put-screener/put_rules.py)，趋势解释在同文件的 `describe_trend()`。源码运行修改后立即生效；wheel 和桌面分发包带构建时的规则快照，修改后需要重新打包。原有行情面板可用 `./moomoo desktop --classic` 打开。
 

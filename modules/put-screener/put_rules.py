@@ -14,8 +14,8 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.2.2'
-RULESET_VERSION = '1.1.1'
+ENGINE_VERSION = '0.3.0'
+RULESET_VERSION = '2.0.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # All must pass BEFORE comparing put premiums. Oversold alone is not a buy signal.
 TREND_RULES = [
@@ -60,6 +60,72 @@ METRICS = frozenset(('bid', 'ask', 'shares', 'strike', 'underlying_price', 'days
 TREND_METRICS = frozenset(('distance_to_ma50_pct', 'ma50_slope_5d_pct', 'breakdown_20d',
                           'rsi14', 'macd_histogram_change'))
 EARNINGS_RULES = frozenset(('earnings-checked', 'earnings-buffer'))
+# Supported-contract boundaries, shown separately from optional strategy filters.
+REQUIRED_FILTERS = frozenset(('standard-contract', 'not-suspended'))
+SORTABLE_METRICS = METRICS - {'iv_pct', 'days_expiry_before_earnings', 'strike_below_20d_low_atr'}
+
+
+def default_configuration():
+    return dict(schema=1,
+        filters={rid: dict(enabled=True, threshold=float(threshold)) for rid, _, _, threshold in RULES},
+        trend_filters={rid: dict(enabled=True, threshold=float(threshold)) for rid, _, _, threshold in TREND_RULES},
+        sort_order=[list(item) for item in SORT_ORDER])
+
+
+def resolve_configuration(configuration=None):
+    """Apply explicit user overrides without ever changing the module defaults."""
+    validate_rules()
+    result = default_configuration()
+    if configuration is None: return result
+    if not isinstance(configuration, dict) or set(configuration) - {'schema', 'filters', 'trend_filters', 'sort_order'}:
+        raise ValueError('Invalid filter configuration keys')
+    if type(configuration.get('schema', 1)) is not int or configuration.get('schema', 1) != 1:
+        raise ValueError('Unsupported filter configuration schema')
+    for group in ('filters', 'trend_filters'):
+        overrides = configuration.get(group, {})
+        if not isinstance(overrides, dict) or set(overrides) - result[group].keys():
+            raise ValueError('Unknown filter in ' + group)
+        for rid, options in overrides.items():
+            if not isinstance(options, dict) or set(options) - {'enabled', 'threshold'}:
+                raise ValueError('Invalid filter options: ' + rid)
+            chosen = dict(result[group][rid], **options)
+            if type(chosen['enabled']) is not bool: raise ValueError('Filter enabled must be boolean: ' + rid)
+            finite(chosen['threshold'], rid)
+            chosen['threshold'] = float(chosen['threshold'])
+            if group == 'filters' and rid in REQUIRED_FILTERS and chosen != result[group][rid]:
+                raise ValueError('Required supported-contract check cannot be disabled or changed: ' + rid)
+            source = RULES if group == 'filters' else TREND_RULES
+            metric = next(metric for key, metric, _, _ in source if key == rid)
+            if group == 'filters' and chosen['threshold'] < 0:
+                raise ValueError('Filter threshold cannot be negative: ' + rid)
+            if metric == 'abs_delta' and not 0 <= chosen['threshold'] <= 1:
+                raise ValueError('Delta threshold must be 0–1')
+            if metric in ('standard_contract', 'not_suspended', 'same_session_snapshot', 'earnings_known', 'trend_allowed', 'breakdown_20d') and chosen['threshold'] not in (0, 1):
+                raise ValueError('Boolean filter threshold must be 0 or 1: ' + rid)
+            if metric == 'rsi14' and not 0 <= chosen['threshold'] <= 100:
+                raise ValueError('RSI threshold must be 0–100')
+            result[group][rid] = chosen
+    for minimum, maximum in (('min-days', 'max-days'), ('min-delta', 'max-delta')):
+        lower, upper = result['filters'].get(minimum), result['filters'].get(maximum)
+        if lower and upper and lower['enabled'] and upper['enabled'] and lower['threshold'] > upper['threshold']:
+            raise ValueError('Minimum filter exceeds maximum: ' + minimum)
+    if 'sort_order' in configuration:
+        order = configuration['sort_order']
+        if not isinstance(order, list) or not order: raise ValueError('At least one sort metric is required')
+        seen = set()
+        for item in order:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                raise ValueError('Sort entries must contain metric and direction')
+            metric, direction = item
+            if not isinstance(metric, str) or metric not in SORTABLE_METRICS or metric in seen or direction not in ('asc', 'desc'):
+                raise ValueError('Invalid, duplicate or nullable sort metric: ' + str(metric))
+            seen.add(metric)
+        result['sort_order'] = [list(item) for item in order]
+    return result
+
+
+def configured_rules(source, options):
+    return [(rid, metric, op, options[rid]['threshold']) for rid, metric, op, _ in source if options[rid]['enabled']]
 
 
 def fingerprint(value):
@@ -103,7 +169,7 @@ def wilder(values, period=14):
     return value
 
 
-def trend(series, session_date, collected_at):
+def trend(series, session_date, collected_at, checks=None):
     """One completed regular-session QFQ series -> auditable trend evidence."""
     if not isinstance(series, dict): raise ValueError('Missing daily history')
     if series.get('error'): raise ValueError('Daily history collection failed: ' + str(series['error']))
@@ -166,14 +232,17 @@ def trend(series, session_date, collected_at):
         lower_highs_and_lows_5d=int(max(b['high'] for b in bars[-5:]) < max(b['high'] for b in bars[-10:-5])
                                   and min(b['low'] for b in bars[-5:]) < min(b['low'] for b in bars[-10:-5])),
         volume_ratio_20d=bars[-1]['volume']/previous_volume if previous_volume else None)
-    evidence = [dict(id=rid, metric=key, actual=values[key], op=op, threshold=threshold,
+    reference = [dict(id=rid, metric=key, actual=values[key], op=op, threshold=threshold,
                      passed=OPS[op](values[key], threshold)) for rid, key, op, threshold in TREND_RULES]
+    evidence = reference if checks is None else [dict(id=rid, metric=key, actual=values[key], op=op,
+                     threshold=threshold, passed=OPS[op](values[key], threshold)) for rid, key, op, threshold in checks]
     failed = [r['id'] for r in evidence if not r['passed']]
     state = ('downtrend' if last < values['ma50'] and values['ma50_slope_5d_pct'] < 0
-             else 'uptrend' if not failed else 'mixed_or_weakening')
+             else 'uptrend' if all(r['passed'] for r in reference) else 'mixed_or_weakening')
     return dict(symbol=series['symbol'], status='ok', as_of=as_of.isoformat(),
                 available_at=series['available_at'], bar_count=len(bars), state=state,
-                allowed=not failed, metrics=values, rules=evidence, failed_rules=failed)
+                allowed=not failed, metrics=values, rules=evidence, failed_rules=failed,
+                reference_rules=reference, baseline_failed_rules=[r['id'] for r in reference if not r['passed']])
 
 
 def describe_trend(evidence):
@@ -284,12 +353,15 @@ def validate_rules():
         trend_ids.add(rid)
         finite(threshold, 'Trend threshold')
     for metric, direction in SORT_ORDER:
-        if metric not in METRICS: raise ValueError('Unknown sort metric: ' + str(metric))
+        if metric not in SORTABLE_METRICS: raise ValueError('Unknown sort metric: ' + str(metric))
         if direction not in ('asc', 'desc'): raise ValueError('Invalid sort direction')
 
 
-def scan(dataset, budget=None):
-    validate_rules()
+def scan(dataset, budget=None, configuration=None):
+    config = resolve_configuration(configuration)
+    filters = configured_rules(RULES, config['filters'])
+    trend_filters = configured_rules(TREND_RULES, config['trend_filters'])
+    order = config['sort_order']
     if not isinstance(dataset, dict) or type(dataset.get('schema')) is not int or dataset['schema'] != 1:
         raise ValueError('Unsupported input schema')
     session = iso_date(dataset.get('session_date'))
@@ -314,7 +386,7 @@ def scan(dataset, budget=None):
     trends = {}
     for symbol in sorted({r.get('symbol') for r in rows if isinstance(r, dict) and isinstance(r.get('symbol'), str)}):
         try:
-            trends[symbol] = trend(histories.get(symbol), session, collected)
+            trends[symbol] = trend(histories.get(symbol), session, collected, trend_filters)
         except (ValueError, TypeError, KeyError, OverflowError, IndexError) as error:
             trends[symbol] = dict(symbol=symbol, status='invalid_data', allowed=False, error=str(error))
     results = []
@@ -328,7 +400,7 @@ def scan(dataset, budget=None):
             values['strike_below_20d_low_atr'] = ((tm['prior_20d_low'] - values['strike']) / tm['atr14']
                                                 if tm.get('atr14', 0) > 0 else None)
             evidence = []
-            for rule_id, metric, op, threshold in RULES:
+            for rule_id, metric, op, threshold in filters:
                 if metric not in values: raise ValueError('Unknown rule metric: ' + metric)
                 actual = values[metric]
                 passed = actual is not None and OPS[op](actual, threshold)
@@ -338,18 +410,25 @@ def scan(dataset, budget=None):
                 evidence.append(dict(id='cash-budget', metric='cash_collateral', actual=values['cash_collateral'],
                                      op='<=', threshold=budget, passed=values['cash_collateral'] <= budget))
             eligible = all(rule['passed'] for rule in evidence)
+            warnings = []
+            if not values['earnings_known']: warnings.append('财报日期或日历完整性未验证')
+            elif values['days_expiry_before_earnings'] < 3: warnings.append('合约跨越或临近已知财报日')
+            if underlying['status'] != 'ok': warnings.append('历史日线无法验证')
+            elif underlying.get('baseline_failed_rules'): warnings.append('标的未通过默认趋势检查')
+            if not values['same_session_snapshot']: warnings.append('报价不属于当前交易日')
             results.append(dict(base, status='ok', eligible=eligible, metrics=values,
                                 rules=evidence, failed_rules=[r['id'] for r in evidence if not r['passed']],
+                                warnings=warnings,
                                 trend_symbol=row['symbol'],
                                 market_state=row.get('market_state', 'UNKNOWN'),
                                 snapshot_update_time=row['snapshot_update_time'], earnings=row.get('earnings'),
-                                live_review_ready=bool(eligible and row.get('market_state') in ('MORNING', 'AFTERNOON')
+                                live_review_ready=bool(eligible and not warnings and row.get('market_state') in ('MORNING', 'AFTERNOON')
                                     and values['snapshot_age_seconds'] <= LIVE_MAX_SNAPSHOT_AGE_SECONDS)))
         except (ValueError, TypeError, KeyError, OverflowError) as error:
             results.append(dict(base, status='invalid_data', eligible=False, live_review_ready=False, error=str(error)))
     def sort_key(row):
         return tuple((-1 if direction == 'desc' else 1) * finite(row['metrics'].get(metric), metric)
-                     for metric, direction in SORT_ORDER) + (row['code'],)
+                     for metric, direction in order) + (row['code'],)
     ranked = sorted((row for row in results if row['eligible']), key=sort_key)
     for index, row in enumerate(ranked, 1): row['rank'] = index
     # Separate incomplete event checks from full eligibility. A KNOWN earnings
@@ -358,16 +437,25 @@ def scan(dataset, budget=None):
                         and row['metrics']['earnings_known'] == 0
                         and set(row['failed_rules']) <= EARNINGS_RULES), key=sort_key)
     for index, row in enumerate(watchlist, 1): row['watchlist_rank'] = index
+    valid = [row for row in results if row['status'] == 'ok']
+    impacts = [dict(id=rid, excluded_count=sum(rid in row['failed_rules'] for row in valid),
+                    qualified_without_filter=sum(set(row['failed_rules']) <= {rid} for row in valid)) for rid, _, _, _ in filters]
+    previews = [dict(disabled_filters=sorted(group), qualified_count=sum(set(row['failed_rules']) <= group for row in valid))
+                for group in ({'underlying-trend'}, set(EARNINGS_RULES), set(EARNINGS_RULES) | {'underlying-trend'})]
     return dict(
         schema=1, purpose='cash_secured_put_research_ranking', source=dataset.get('source'),
         session_date=session.isoformat(), collected_at=dataset['collected_at'],
         engine_version=ENGINE_VERSION, ruleset_version=RULESET_VERSION,
         engine_file_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        rules_sha256=fingerprint(dict(rules=RULES, trend_rules=TREND_RULES, sort=SORT_ORDER)), dataset_sha256=fingerprint(dataset),
+        rules_sha256=fingerprint(config), dataset_sha256=fingerprint(dataset),
         assumption='One standard US equity/ETF put, fully cash secured, willing to accept shares; user suitability not established',
         cash_budget=budget, budget_checked=budget is not None,
-        ranking_objective='Pass every hard rule, then sort lexicographically by sort_order; not an expected-return prediction',
-        sort_order=SORT_ORDER, rules=RULES, trend_rules=TREND_RULES, underlyings=trends, total_contracts=len(rows),
+        ranking_objective='Pass required data checks and enabled filters, then sort independently by sort_order',
+        configuration=config, default_configuration=default_configuration(),
+        disabled_filters=[rid for rid, option in config['filters'].items() if not option['enabled']],
+        filter_impact=impacts, relaxation_preview=previews,
+        sort_order=order, rules=filters, trend_rules=trend_filters, all_rules=RULES,
+        all_trend_rules=TREND_RULES, underlyings=trends, total_contracts=len(rows),
         missing_quote_codes=dataset.get('missing_quote_codes', []),
         calendar_errors=dataset.get('calendar_errors', []),
         qualified_count=len(ranked), best_research_code=ranked[0]['code'] if ranked else None,
@@ -380,7 +468,7 @@ def scan(dataset, budget=None):
             'Bid-based estimates are not fill guarantees. All returns and P/L exclude fees, slippage, taxes and cash interest.',
             'Simple annualization is a comparison scale, not a forecast or compounded return.',
             'Delta is price sensitivity, not an exact assignment or profit probability.',
-            'Earnings are provider listings and may change; unknown dates fail the earnings rules.',
+            'Earnings are provider listings and may change; unknown dates fail enabled earnings filters and remain flagged when disabled.',
             'Snapshot timestamps do not guarantee bid freshness; market-closed / stale snapshots are research only.',
             'No portfolio concentration, issuer valuation, news or user-specific suitability assessment; no order execution.',
         ])
@@ -391,12 +479,14 @@ def main(argv=None):
     parser.add_argument('input', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--budget', type=float, help='Maximum USD cash for ONE assigned contract; omitted means not checked')
+    parser.add_argument('--config', type=Path, help='JSON with explicit filter toggles/thresholds and independent sort_order')
     parser.add_argument('--csv-output', type=Path, help='Export qualified candidates and the separate earnings-unverified watchlist')
     parser.add_argument('--top', type=int, default=10)
     args = parser.parse_args(argv)
     try:
         if args.top < 1: raise ValueError('--top must be positive')
-        report = scan(json.loads(args.input.read_text()), args.budget)
+        config = json.loads(args.config.read_text(encoding='utf-8')) if args.config else None
+        report = scan(json.loads(args.input.read_text(encoding='utf-8')), args.budget, config)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + '\n')
         if args.csv_output:

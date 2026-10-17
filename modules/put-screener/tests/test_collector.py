@@ -98,6 +98,12 @@ class CollectorTests(unittest.TestCase):
         with self.assertRaises(ValueError): collector.collect(self.sdk, self.context, ['HK.00700'])
         self.assertEqual(self.context.calls, [])
 
+    def test_history_failure_keeps_option_data_for_explicit_filter_choices(self):
+        with patch.object(collector, 'collect_daily_series', side_effect=RuntimeError('history permission denied')):
+            result = self.collect()
+        self.assertEqual(result['contracts'][0]['bid'], 1.5)
+        self.assertIn('history permission denied', result['daily_series'][0]['error'])
+
 
 class HistoryCollectorTests(unittest.TestCase):
     def test_completed_session_respects_close_half_days_and_weekends(self):

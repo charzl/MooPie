@@ -1,10 +1,10 @@
 name: Client platform CI
 on:
   pull_request:
-    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', 'scripts/build-windows.py', '.github/workflows/client-platforms.yml']
+    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', 'scripts/build-windows.py', 'scripts/*research*.py', '.github/workflows/client-platforms.yml']
   push:
     branches: [main]
-    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', 'scripts/build-windows.py', '.github/workflows/client-platforms.yml']
+    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', 'scripts/build-windows.py', 'scripts/*research*.py', '.github/workflows/client-platforms.yml']
   workflow_dispatch:
 permissions:
   contents: read

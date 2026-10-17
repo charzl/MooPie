@@ -13,6 +13,8 @@ METRICS = {
     'breakdown_20d': '收盘跌破此前 20 日低点', 'rsi14': 'RSI14',
     'macd_histogram_change': 'MACD 柱较前日变化', 'cash_collateral': '现金担保（美元）',
     'annualized_gross_return_pct': '现金担保权利金简单年化',
+    'gross_return_pct': '到期现金担保回报',
+    'premium_per_contract_before_costs': '每张权利金（费用前）',
 }
 FLAGS = {'standard_contract', 'not_suspended', 'same_session_snapshot', 'earnings_known',
          'trend_allowed', 'breakdown_20d'}
@@ -45,36 +47,69 @@ def table(headers, rows):
 
 
 def rules_html(config):
-    content = '<h2>筛选条件</h2><p>以下条件必须全部通过，再比较收益。阈值为初版研究规则，尚未经回测。</p>'
+    content = '<h2>筛选条件</h2><p>只要求已启用的 Filter 全部通过，再按独立 Sort 排序。阈值为初版研究规则，尚未经回测。</p>'
     content += '<h3>标的趋势</h3>' + table(['条件'], [[condition_text(r)] for r in config['trend_rules']])
     content += '<h3>合约条件</h3>' + table(['条件'], [[condition_text(r)] for r in config['rules']])
     content += '<p>还需有有效 Bid/Ask、Put Delta、合约身份、股数及已完成日线；缺少关键数据会排除。IV 仅展示，不参与当前排序；接口返回 IV=0 时记为未知。</p>'
-    order = ' → '.join(METRICS.get(metric, metric) + ('从高到低' if direction == 'desc' else '从低到高') for metric, direction in config['sort_order'])
+    order = sort_description(config['sort_order'])
     content += '<h3>通过后的排序</h3><p>' + escape(order) + '</p>'
     content += '<p>简单年化 = Bid ÷ 行权价 × 365 ÷ 到期天数 × 100%。按一张标准合约全额现金担保，不含费用，不保证成交；桌面尚未校验个人预算。</p>'
-    content += '<p>财报未知不等于没有财报。未全部通过的合约不会被标成推荐。</p>'
+    content += '<p>财报未知不等于没有财报。用户关闭财报 Filter 后可留下合约，但未知状态仍会显示。</p>'
     return content
+
+
+def sort_description(order):
+    return ' → '.join(METRICS.get(metric, metric) + ('从高到低' if direction == 'desc' else '从低到高') for metric, direction in order)
+
+
+def ranking_html(report):
+    primary = report['sort_order'][0][0]
+    rows = [[row['rank'], row['code'], value_text(primary, row['metrics'][primary])] for row in report['ranked'][:10]]
+    return '<h3>候选排序（前10名）</h3>' + table(['排名', '合约', METRICS.get(primary, primary)], rows)
 
 
 def explanation_html(report):
     content = '<h3>筛选依据与排除原因</h3>'
+    configuration = report.get('configuration', {})
+    options = configuration.get('filters', {})
+    trend_options = configuration.get('trend_filters', {})
+    trend_enabled = options.get('underlying-trend', {}).get('enabled', True)
+    disabled = report.get('disabled_filters', [])
+    if disabled:
+        sources = {rid: metric for rid, metric, _, _ in report.get('all_rules', report['rules'])}
+        content += '<p><b>已关闭的 Filter：</b>' + escape('、'.join(METRICS.get(sources.get(rid), rid) for rid in disabled)) + '。这些条件不参与排除，相关风险仍需复核。</p>'
     for code, trend in report['underlyings'].items():
-        content += f'<p><b>{escape(code)}：{"趋势通过" if trend["allowed"] else "趋势未通过"}</b></p>'
+        state = '趋势 Filter 已关闭（以下仅作参考）' if not trend_enabled else '已选趋势 Filter 通过' if trend['allowed'] else '已选趋势 Filter 未通过'
+        content += f'<p><b>{escape(code)}：{state}</b></p>'
         if trend['status'] != 'ok':
             content += '<p>日线数据无法验证：' + escape(trend.get('error', '未知原因')) + '</p>'
             continue
         metrics = trend['metrics']
         content += f'<p>日线 {escape(trend["as_of"])}：收盘 {metrics["close"]:.2f}，MA50 {metrics["ma50"]:.2f}。</p>'
-        rows = [[condition_text((r['id'], r['metric'], r['op'], r['threshold'])),
-                 value_text(r['metric'], r['actual']), '通过' if r['passed'] else '未通过'] for r in trend['rules']]
+        selected = {r['id']: r for r in trend['rules']}
+        rows = []
+        for reference in trend.get('reference_rules', trend['rules']):
+            r = selected.get(reference['id'], reference)
+            enabled = trend_enabled and trend_options.get(r['id'], {}).get('enabled', True)
+            rows.append([condition_text((r['id'], r['metric'], r['op'], r['threshold'])),
+                         value_text(r['metric'], r['actual']), ('通过' if r['passed'] else '未通过') if enabled else '未启用'])
         content += table(['趋势条件', '实际值', '结果'], rows)
     valid = [row for row in report['results'] if row['status'] == 'ok']
     counts = Counter(r for row in valid for r in row['failed_rules'])
     content += f'<h3>合约条件逐项检查</h3><p>以下统计针对 {len(valid)} 个基础数据有效的合约；同一合约可同时违反多个条件，不能将各项数量相加。</p>'
     content += table(['条件', '未通过 / 已评估'],
                      [[condition_text(r), f'{counts[r[0]]} / {len(valid)}'] for r in report['rules']])
+    if report.get('qualified_count') == 0 and report.get('filter_impact'):
+        sources = {r[0]: r for r in report['rules']}
+        content += '<h3>放宽预览（尚未应用）</h3><p>下面只展示模拟数量，不会替你修改 Filter。基础数据无效的合约不会被放回。</p>'
+        candidates = [r for r in report['filter_impact'] if r['id'] not in ('standard-contract', 'not-suspended') and r['excluded_count']]
+        content += table(['如果关闭这一项', '预计候选数'], [[condition_text(sources[r['id']]), r['qualified_without_filter']] for r in candidates])
+        group_labels = {frozenset({'underlying-trend'}): '关闭整个趋势 Filter',
+                        frozenset({'earnings-checked', 'earnings-buffer'}): '同时关闭两项财报 Filter',
+                        frozenset({'earnings-checked', 'earnings-buffer', 'underlying-trend'}): '同时关闭趋势与财报 Filter'}
+        content += table(['组合模拟', '预计候选数'], [[group_labels.get(frozenset(r['disabled_filters']), '关闭多项'), r['qualified_count']] for r in report.get('relaxation_preview', [])])
     errors = Counter(row['error'] for row in report['results'] if row['status'] == 'invalid_data')
     if errors:
         content += '<h3>基础数据问题</h3>' + table(['原因', '合约数'], [[ERRORS.get(e, e), count] for e, count in errors.most_common()])
-    content += '<p>点「筛选条件」查看完整规则；导出 JSON 可查看每个合约的实际值、阈值和未通过项。</p>'
+    content += '<p>点「Filter / Sort 设置」调整条件和排序；导出 JSON 可查看原始数据、配置及每个合约的实际值、阈值和未通过项。</p>'
     return content

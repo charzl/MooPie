@@ -32,7 +32,16 @@ def trend_report(payload, code, rules=None):
     return evidence
 
 
-def run_research(service, symbol, action):
+def analyze_put_dataset(dataset, symbol, configuration=None):
+    code = us_symbols([symbol])[0]
+    owners = set(dataset.get('symbols', [])) | {r.get('symbol') for r in dataset.get('contracts', [])}
+    if owners and owners != {code}: raise ValueError('Cached dataset does not match the requested stock')
+    report = load_rules().scan(dataset, configuration=configuration)
+    return dict(action='put', symbol=code, collected_at=dataset['collected_at'],
+                report=report, input_dataset=dataset)
+
+
+def run_research(service, symbol, action, configuration=None):
     code = us_symbols([symbol])[0]
     rules = load_rules()
     if action == 'trend':
@@ -42,5 +51,4 @@ def run_research(service, symbol, action):
     if action != 'put':
         raise ValueError('Unknown research action: ' + action)
     dataset = service.collect_put_dataset([code], months=3)
-    report = rules.scan(dataset)
-    return dict(action=action, symbol=code, collected_at=dataset['collected_at'], report=report)
+    return analyze_put_dataset(dataset, code, configuration)

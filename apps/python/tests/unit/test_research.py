@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
-from moopython.research import load_rules, run_research
+from moopython.research import analyze_put_dataset, load_rules, run_research
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -51,3 +51,21 @@ class ResearchTests(unittest.TestCase):
         result = run_research(self.service(), code, 'put')
         self.assertFalse(result['report']['ranked'])
         with self.assertRaises(ValueError): run_research(self.service(), 'HK.00700', 'trend')
+
+    def test_cached_data_can_be_refiltered_offline_and_keeps_original_time(self):
+        import subprocess, sys, tempfile
+        self.dataset['contracts'][0]['earnings'] = None
+        code = self.dataset['contracts'][0]['symbol']
+        config = dict(filters={rid: dict(enabled=False) for rid in ('earnings-checked', 'earnings-buffer')})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root/'input data.json'; settings = root/'filters.json'; output = root/'result.json'
+            source.write_text(json.dumps(self.dataset), encoding='utf-8'); settings.write_text(json.dumps(config))
+            process = subprocess.run([sys.executable, '-m', 'moopython.research_cli', 'put', code,
+                '--input', str(source), '--config', str(settings), '--port', '1', '--output', str(output)], capture_output=True)
+            self.assertEqual(process.returncode, 0, process.stderr)
+            result = json.loads(output.read_text(encoding='utf-8'))
+            self.assertEqual(result['report']['qualified_count'], 1)
+            self.assertEqual(result['collected_at'], self.dataset['collected_at'])
+            self.assertEqual(result['input_dataset'], self.dataset)
+        with self.assertRaisesRegex(ValueError, 'does not match'):
+            analyze_put_dataset(self.dataset, 'NVDA', config)

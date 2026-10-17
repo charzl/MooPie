@@ -7,11 +7,12 @@ import time
 import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-from PySide6.QtCore import QProcess, QSettings
+from PySide6.QtCore import QProcess, QSettings, QTimer
 from PySide6.QtGui import QFont, QRawFont
 from PySide6.QtWidgets import QApplication
 from moopython.research import load_rules
 from moopython.research_ui import ResearchWindow
+from moopython.research_controls import FilterSortDialog
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -36,6 +37,56 @@ class ResearchUiTests(unittest.TestCase):
         font = QRawFont.fromFont(QFont('Noto Sans SC', 14))
         self.assertTrue(font.isValid())
         for character in '股票走势Put123': self.assertTrue(font.supportsCharacter(ord(character)), character)
+
+    def test_filter_editor_and_sort_editor_are_independent(self):
+        dialog = FilterSortDialog(self.window.configuration, parent=self.window)
+        try:
+            metric, direction = dialog.sort_controls[0]
+            metric.setCurrentIndex(metric.findData('cash_collateral')); direction.setCurrentIndex(direction.findData('asc'))
+            original_sort = dialog.configuration()['sort_order']
+            dialog.disable_optional()
+            disabled = dialog.configuration()
+            self.assertTrue(disabled['filters']['standard-contract']['enabled'])
+            self.assertFalse(disabled['filters']['underlying-trend']['enabled'])
+            self.assertEqual(disabled['sort_order'], original_sort)
+            dialog.restore_filters()
+            self.assertEqual(dialog.configuration()['sort_order'], original_sort)
+            self.assertTrue(dialog.configuration()['filters']['underlying-trend']['enabled'])
+        finally: dialog.close()
+
+    def test_applying_filters_reuses_data_offline_and_persists_choices(self):
+        self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        self.dataset['contracts'][0]['earnings'] = None
+        result = self.result(); result['input_dataset'] = self.dataset
+        self.window.display(result)
+        errors = []
+        def choose():
+            dialog = self.app.activeModalWidget()
+            try:
+                self.assertIsInstance(dialog, FilterSortDialog)
+                for rid in ('earnings-checked', 'earnings-buffer'):
+                    dialog.controls[('filters', rid)][0].setChecked(False)
+                metric, direction = dialog.sort_controls[0]
+                metric.setCurrentIndex(metric.findData('cash_collateral')); direction.setCurrentIndex(direction.findData('asc'))
+                dialog.configuration()
+                dialog.apply()
+            except Exception as error:
+                errors.append(error)
+                if dialog: dialog.reject()
+        QTimer.singleShot(0, choose)
+        self.window.show_rules()
+        self.assertFalse(errors, errors)
+        deadline = time.monotonic() + 15
+        while self.window.process is not None and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.01)
+        self.assertIsNone(self.window.process)
+        report = self.window.results['put']['report']
+        self.assertEqual(report['qualified_count'], 1)
+        self.assertEqual(report['collected_at'], self.dataset['collected_at'])
+        self.assertIn('财报日期或日历完整性未验证', self.window.put_result.toPlainText())
+        saved = json.loads(self.window.settings.value('filter_sort_configuration'))
+        self.assertFalse(saved['filters']['earnings-checked']['enabled'])
+        self.assertEqual(saved['sort_order'][0], ['cash_collateral', 'asc'])
 
     def test_single_best_put_risks_and_symbol_change_clears_both_results(self):
         result = self.result(); self.window.display(result)

@@ -15,7 +15,7 @@ command -v uv
 ./moomoo --help
 ```
 
-保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前研究桌面分支为 `codex/research-desktop`。不要为安装强制清空工作区或覆盖其他配置。
+保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前可配置筛选分支为 `codex/configurable-put-filters`。不要为安装强制清空工作区或覆盖其他配置。
 
 项目要求 Python `>=3.14,<3.15`。默认安装 CLI/MCP，桌面是可选功能。不修改系统 Python，不要求用户手动激活虚拟环境。以 `apps/python/pyproject.toml` 和 `requirements.txt` 为依赖依据，更新版本时同步检查构建依赖。
 
@@ -127,6 +127,10 @@ tool_timeout_sec = 120
 支持用户指定标的，不写死 AVGO。分析规则保留在独立 `modules/put-screener/put_rules.py`，修改 `TREND_RULES` / `RULES` / `SORT_ORDER` 后更新规则版本，对同一输入重跑。抓取、协议、分析和以后可能添加的存储层保持分离。
 
 趋势分析报告数据日期/时区、考察期限、指标值、关键价位和改判条件；只使用已完成日线，不把规则命中数当成经过校准的涨跌概率。Put 结果查看 `ranked`、财报未验证观察名单、`failed_rules`、预算及快照时间。空结果保留，不为产生候选自动放宽规则；未知财报不推断成无财报。
+
+Filter 与 Sort 分离：`scan(dataset, budget=None, configuration=None)` 接受用户明确选择的开关、阈值及独立排序。CLI 用 `--config`；规则默认值仍在同一独立 Python 文件。标准合约/未停牌与基础有效性检查不能关闭。用户可显式关闭趋势或两项财报 Filter；此时相关未知/风险状态仍展示，不能声称已验证。`filter_impact` / `relaxation_preview` 是模拟数量，不是自动放宽授权。
+
+桌面配置界面在 `research_controls.py`，不是第二套规则。修改配置后优先通过研究子进程的 `--input` 离线重算现有 `input_dataset`，保持原始 `collected_at`；点击主抓取按钮才刷新。股票/端口改变后丢弃缓存；导出包含数据、实际配置和证据。日线抓取失败需保留期权数据和明确错误：启用趋势 Filter 时阻止候选，用户关闭后可继续其他过滤。
 
 原始行情和分析结果写 gitignored 的 `artifacts/`。不提交账号、真实行情和本机绝对配置。数据库和旧数据清理优先级较低，基础安装时不添加数据库、定时任务或新的后台常驻服务。
 

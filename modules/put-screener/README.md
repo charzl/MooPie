@@ -2,7 +2,9 @@
 
 规则、阈值、计算、排序和 JSON/CSV 输出都在 **`put_rules.py`**。这是单个独立 Python 文件，只依赖标准库，直接复制它即可运行；无需安装 Qt、moomoo SDK 或 `modules/rule-engine`。开发和 CI 使用 Python 3.14。
 
-后续修改时，编辑文件顶部的 `TREND_RULES`、`RULES`、`SORT_ORDER`，提高 `RULESET_VERSION`，然后对相同输入重新运行。新增计算指标时，在同一个文件的 `metrics()` 和 `METRICS` 中添加。所有规则都是硬条件，不能通过其他指标的高分抵消。报告记录规则指纹、整个引擎文件指纹和输入数据指纹，便于比较不同版本。
+Filter 决定保留哪些合约，Sort 独立决定保留者的顺序。`TREND_RULES`、`RULES`、`SORT_ORDER` 是可编辑的默认值；每次运行可通过 JSON `configuration` 覆盖开关、阈值和排序，不改变默认值。已启用的 Filter 必须全部通过；关闭的条件不再排除，但相关风险仍保留。标准100股/未停牌和计算所需基础数据检查始终执行。报告记录实际配置、指纹和输入数据指纹，便于复现。
+
+新增指标或修改默认规则时仍只编辑同一 `put_rules.py`，提高 `RULESET_VERSION`。`scan(dataset, budget=None, configuration=None)` 的第三个参数即用户配置。
 
 ## 采集与运行
 
@@ -25,6 +27,21 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
 
 把上面的 `input.json` 交给规则文件即可独立重跑，修改规则无需再次联网，也无需重新打包客户端。单独复制引擎文件时，输入字段参考 `example.json`；该示例完全是合成数据。
 
+例如用户明确选择放宽最小未平仓量、关闭趋势过滤并改为低 Delta 优先时，将下面保存为 `filters.json`（演示配置，不是策略建议）：
+
+```json
+{
+  "schema": 1,
+  "filters": {
+    "open-interest": {"threshold": 100},
+    "underlying-trend": {"enabled": false}
+  },
+  "sort_order": [["abs_delta", "asc"], ["spread_pct_of_mid", "asc"]]
+}
+```
+
+运行 `./moomoo analyze input.json --config filters.json --output ranking.json`。未指定项继承默认值，字段拼错、重复排序或最小值高于最大值会报错。趋势子条件用 `trend_filters`，例如 `{"rsi-floor":{"enabled":false}}`。允许未知财报需显式关闭 `earnings-checked` 和 `earnings-buffer` 两项；关闭前者而保留后者，未知日期仍无法通过间隔检查。
+
 ## 股票趋势先筛选
 
 先计算每个股票的日线趋势，再筛选其 Put。默认五个硬条件定义在独立文件顶部的 `TREND_RULES`，只是待验证的初始研究假设，不是经过回测的收益优势：
@@ -41,7 +58,7 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
 
 MA 使用简单平均；EMA 使用 SMA 初值；RSI 和 ATR 使用 Wilder 平滑。浮点误差范围内的 MACD 柱变化取 12 位小数。不同软件因初始化、复权和数据长度，结果可能略有差异。RSI 超卖不能独立证明止跌；趋势通过也不代表未来不会下跌，不输出未经校准的下跌概率。
 
-采集只使用常规时段、前复权、已完成日线；按美股交易日历处理周末、假期和半日市，收盘后留 5 分钟。至少需要 205 根日线；缺失、重复、未完成、非复权或时点不一致的数据会阻止该股票的所有候选。盘中只能使用上一已完成交易日；报价采集时间之前尚未收盘的日线不可用于该次分析。`underlyings` 保存每个股票的指标、规则和失败原因，合约只关联其股票，避免重复保存指标证据。
+采集只使用常规时段、前复权、已完成日线；按美股交易日历处理周末、假期和半日市，收盘后留 5 分钟。至少需要205根日线；无效日线会阻止启用趋势 Filter 时的候选。关闭趋势 Filter 后，错误仍显示，但可继续其他过滤。盘中只能使用上一已完成交易日；报价采集时间之前尚未收盘的日线不可用于该次分析。`underlyings` 保存实际筛选检查和默认趋势参考；关闭某项 Filter 不改变趋势描述。
 
 已有报价文件可单独补日线，保留原报价采集时间并以该时间为可用数据截止点：
 
@@ -70,7 +87,7 @@ apps/python/.venv/bin/python scripts/collect-put-data.py \
 | 股票趋势 | 必须通过上述全部趋势条件；缺少日线时不放行 |
 | 预算 | 可选：行权价×100 不超过传入预算；未提供时明确标记未检查 |
 
-通过所有条件后，按 `Bid÷行权价×365÷剩余天数` 从高到低排序；并列时优先较小的相对价差、较低的绝对 Delta，最后按合约代码固定顺序。这是满足阈值后的简单年化毛权利金比较，未做回测，不代表最优策略、预期收益或可重复年化收益。
+通过全部已启用 Filter 后，默认按 `Bid÷行权价×365÷剩余天数` 从高到低排序，并列时比较价差、绝对Delta，最后按合约代码固定顺序。用户可独立修改 `sort_order`；Sort 不改变候选集合。默认简单年化比较未经回测，不代表预期或可重复收益。
 
 期限和年化统一以输入的 `session_date` 为报价基准日。周末重跑上一个交易日的输入，得到的仍是该交易日的研究排名。
 
@@ -86,7 +103,9 @@ apps/python/.venv/bin/python scripts/collect-put-data.py \
 
 ## 合格与待确认名单
 
-`ranked` 只包含所有条件通过的合约。财报未知时，合约保持 `eligible=false`；如果其余趋势、报价和风险规则全部通过，则单独进入 `earnings_unverified_watchlist`。已知财报会跨越合约期限的合约不会进入该名单。CSV 通过 `category` 明确区分这两种结果。
+`ranked` 只包含基础校验和全部已启用 Filter 通过的合约。默认财报未知仍是 `eligible=false`；其余已选条件通过时进入 `earnings_unverified_watchlist`。用户明确关闭两项财报 Filter 后，合约可进入当前配置的排名，但 `warnings` 保留未验证状态，`live_review_ready=false`。已知财报冲突同样不会因关闭 Filter 而消除提示。
+
+`filter_impact` 显示单项排除数与仅关闭该项后的候选数；`relaxation_preview` 模拟关闭趋势、财报或两者后的数量。计数可重叠，这些模拟不修改配置。桌面可用已采集数据离线重新筛选；时间仍是原始采集时点，不表示刷新了报价。
 
 财报来自 moomoo 日历，不表示发行人已经确认。未列出日期属于未知，不能推断无财报；即使日历列出日期，交易前仍应核对最新公告。当前采集结果若在收盘后获取，排序仅用于研究；`live_review_ready` 只有在常规市场开放且快照时间未超过 15 分钟时才可能为 true。快照更新时间也不能保证 Bid 的真实时效，该标志不表示可以自动下单。
 

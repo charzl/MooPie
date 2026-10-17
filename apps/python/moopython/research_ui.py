@@ -13,14 +13,19 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 
 from .market_collection import us_symbols
 from .runtime import OpenDRuntime
-from .research_explanation import explanation_html, rules_html
+from .research_explanation import explanation_html, sort_description, ranking_html
+from .research import load_rules
+from .research_controls import FilterSortDialog
 
 STYLE = '''
 QWidget {background:#10171e;color:#e8eef2;font-size:14px;font-family:"Noto Sans SC";}
 QLabel#eyebrow {color:#6fd9bf;font-size:12px;font-weight:bold;}
 QLabel#title {font-size:30px;font-weight:bold;}
 QLabel#muted {color:#9aaab7;font-size:12px;}
-QLineEdit,QSpinBox {background:#1a2631;border:1px solid #354756;border-radius:8px;padding:10px;}
+QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox {background:#1a2631;border:1px solid #354756;border-radius:8px;padding:10px;}
+QComboBox QAbstractItemView {background:#1a2631;color:#e8eef2;selection-background-color:#304655;}
+QTabBar::tab {background:#1a2631;padding:10px 18px;border:1px solid #354756;}
+QTabBar::tab:selected {color:#6fd9bf;background:#233340;}
 QPushButton {background:#233340;border:1px solid #354756;border-radius:8px;padding:12px 18px;font-weight:bold;}
 QPushButton:hover {background:#304655;}
 QPushButton#primary {background:#ef9854;color:#171d22;border:0;}
@@ -47,6 +52,11 @@ class ResearchWindow(QMainWindow):
         self.settings = settings or QSettings('MooClients', 'Research')
         self.process = None
         self.results = {}
+        self.put_dataset = None
+        try:
+            saved_config = self.settings.value('filter_sort_configuration', '')
+            self.configuration = load_rules().resolve_configuration(json.loads(saved_config) if saved_config else None)
+        except (ValueError, TypeError): self.configuration = load_rules().default_configuration()
         self.output = bytearray()
         self.errors = bytearray()
         self.action = None
@@ -79,11 +89,12 @@ class ResearchWindow(QMainWindow):
         settings_row = QHBoxLayout()
         hint = QLabel('美股 · 未来三个月期权 · 现金担保 Put'); hint.setObjectName('muted')
         settings_row.addWidget(hint); settings_row.addStretch()
-        self.rules_button = QPushButton('筛选条件')
+        self.rules_button = QPushButton('Filter / Sort 设置')
         self.rules_button.clicked.connect(self.show_rules)
         settings_row.addWidget(self.rules_button)
         settings_row.addWidget(QLabel('OpenD 端口'))
         self.port = QSpinBox(); self.port.setRange(1, 65535); self.port.setValue(port)
+        self.port.valueChanged.connect(self.reset_panels)
         settings_row.addWidget(self.port)
         layout.addLayout(settings_row)
         panels = QHBoxLayout(); panels.setSpacing(16)
@@ -105,26 +116,32 @@ class ResearchWindow(QMainWindow):
 
     def reset_panels(self):
         self.results.clear()
-        self.put_result.setHtml('<h2>卖出 Put</h2><p>通过趋势、期限、流动性和财报检查后，显示规则排名第一的合约。</p><p style="color:#9aaab7">不符合条件时，保留空结果并说明原因。</p>')
+        self.put_dataset = None
+        self.put_result.setHtml('<h2>卖出 Put</h2><p>先按已启用的 Filter 过滤，再按独立 Sort 设置排序。</p><p style="color:#9aaab7">可以选择过滤条件和阈值；没有候选时，查看原因后自行调整。</p>')
         self.trend_result.setHtml('<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>')
         if hasattr(self, 'export_button'): self.export_button.setEnabled(False)
 
     def busy(self, value):
-        for control in (self.symbol, self.port, self.put_button, self.trend_button): control.setEnabled(not value)
+        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.rules_button): control.setEnabled(not value)
         self.cancel_button.setVisible(value)
 
-    def start(self, action):
+    def start(self, action, reuse=False):
         if self.process is not None: return
         try: code = us_symbols([self.symbol.text().strip()])[0]
         except ValueError as error:
             self.status.setText(str(error)); return
+        dataset = self.put_dataset if action == 'put' and reuse else None
+        if reuse and dataset is None:
+            self.status.setText('没有可复用的数据，请先抓取。'); return
+        if action == 'put' and not reuse: self.put_dataset = None
         self.settings.setValue('symbol', code.removeprefix('US.'))
         self.action = action
         self.cancelled = False
         self.results.pop(action, None)
         self.export_button.setEnabled(bool(self.results))
         self.panel(action).setHtml(f'<h2>{esc(code)}</h2><p>正在抓取和分析…</p>')
-        self.status.setText('正在读取 OpenD；期权查询有频率限制，可能需要几分钟。' if action == 'put' else '正在读取已完成日线…')
+        self.status.setText('正在用已采集的数据重新过滤和排序，不重新抓取行情。' if reuse else
+                            '正在读取 OpenD；期权查询有频率限制，可能需要几分钟。' if action == 'put' else '正在读取已完成日线…')
         self.output.clear(); self.errors.clear()
         self.result_path.unlink(missing_ok=True)
         process = QProcess(self); self.process = process
@@ -136,8 +153,17 @@ class ResearchWindow(QMainWindow):
         process.finished.connect(self.finished)
         process.errorOccurred.connect(self.process_error)
         args = (['research'] if getattr(sys, 'frozen', False) else ['-X', 'utf8', '-m', 'moopython.research_cli'])
+        extra = []
+        if action == 'put':
+            config_path = Path(self.workspace.name) / 'configuration.json'
+            config_path.write_text(json.dumps(self.configuration, allow_nan=False), encoding='utf-8')
+            extra += ['--config', str(config_path)]
+            if dataset is not None:
+                dataset_path = Path(self.workspace.name) / 'dataset.json'
+                dataset_path.write_text(json.dumps(dataset, allow_nan=False), encoding='utf-8')
+                extra += ['--input', str(dataset_path)]
         self.busy(True)
-        process.start(sys.executable, [*args, action, code, '--port', str(self.port.value()), '--output', str(self.result_path)])
+        process.start(sys.executable, [*args, action, code, '--port', str(self.port.value()), '--output', str(self.result_path), *extra])
 
     def panel(self, action):
         return self.put_result if action == 'put' else self.trend_result
@@ -198,7 +224,10 @@ class ResearchWindow(QMainWindow):
             content += f'<h3>什么会改变判断</h3><p>{esc(outlook["change_condition"])}</p><p>日线截至 {esc(trend["as_of"])} · 纽约交易日</p><p>{esc(outlook["limitation"])}</p>'
         else:
             report = result['report']; ranked = report['ranked']
-            content = f'<p>检查 {report["total_contracts"]} 个合约，{report["qualified_count"]} 个符合规则。</p>'
+            self.put_dataset = result.get('input_dataset')
+            self.configuration = report.get('configuration', self.configuration)
+            content = f'<p>检查 {report["total_contracts"]} 个合约，{report["qualified_count"]} 个通过当前 Filter。</p>'
+            content += '<p>Sort：' + esc(sort_description(report['sort_order'])) + '</p>'
             if ranked:
                 best = ranked[0]; m = best['metrics']
                 content += f'<h3>{esc(best["code"])}</h3><p>到期 {esc(best["expiration"])} · {m["days_to_expiry"]} 天</p>'
@@ -211,11 +240,13 @@ class ResearchWindow(QMainWindow):
                           ('买卖价差 / 未平仓量', f'{m["spread_pct_of_mid"]:.2f}% / {m["open_interest"]:,.0f}'),
                           ('最大亏损（股价归零）', f'${m["max_loss_before_costs"]:,.2f}')]
                 content += ''.join(f'<p>{label}：<b>{value}</b></p>' for label, value in fields)
-                content += '<h3>入选原因</h3><p>通过全部硬性规则；按现金担保权利金简单年化排序，价差和 Delta 用于同分比较。</p>'
+                content += '<h3>排名原因</h3><p>通过当前已启用的 Filter，在上述 Sort 设置下排名第一。</p>'
+                for warning in best.get('warnings', []): content += '<p><b>需复核：' + esc(warning) + '</b></p>'
                 content += f'<p>合约快照：{esc(best["snapshot_update_time"])} · 纽约时间</p>'
-                if not best['live_review_ready']: content += '<p><b>休市或快照较旧，仅供研究；交易前需刷新报价。</b></p>'
+                if not best['live_review_ready']: content += '<p><b>仅供研究；交易前需核对上述风险并刷新报价。</b></p>'
+                content += ranking_html(report)
             else:
-                content += '<h3>没有符合当前规则的 Put</h3><p>不自动放宽规则。</p>'
+                content += '<h3>没有符合当前 Filter 的 Put</h3><p>可打开 Filter / Sort 设置，自行关闭条件或调整阈值；程序不会自动放宽。</p>'
                 unknown = len(report['earnings_unverified_watchlist'])
                 if unknown: content += f'<p>{unknown} 个合约仅因财报日期尚未验证，保留在导出结果的观察名单中。</p>'
             missing = len(report['missing_quote_codes'])
@@ -224,20 +255,21 @@ class ResearchWindow(QMainWindow):
             content += explanation_html(report)
             content += f'<p>交易日 {esc(report["session_date"])} · 规则 {esc(report["ruleset_version"])}</p><p>按一张标准合约全额现金担保计算；未校验个人资金预算。收益不含费用、不保证成交，规则尚未经回测。</p>'
         self.panel(action).setHtml(heading + content)
-        self.status.setText('抓取完成：' + result['collected_at'] + ' · 可导出完整指标和规则证据')
+        self.status.setText('分析完成 · 数据采集：' + result['collected_at'] + ' · 可导出数据、Filter、Sort 和规则证据')
         self.export_button.setEnabled(True)
 
     def show_rules(self):
-        dialog = QDialog(self); dialog.setWindowTitle('Put 筛选条件'); dialog.resize(780, 700)
-        layout = QVBoxLayout(dialog); browser = QTextBrowser()
         report = self.results.get('put', {}).get('report')
-        if report is None:
-            from .research import load_rules
-            rules = load_rules()
-            report = dict(rules=rules.RULES, trend_rules=rules.TREND_RULES, sort_order=rules.SORT_ORDER)
-        browser.setHtml(rules_html(report)); layout.addWidget(browser)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(dialog.reject); layout.addWidget(buttons); dialog.exec()
+        dialog = FilterSortDialog(self.configuration, report, self.put_dataset is not None, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted: return
+        self.configuration = dialog.selected_configuration
+        self.settings.setValue('filter_sort_configuration', json.dumps(self.configuration))
+        if self.put_dataset is not None: self.start('put', reuse=True)
+        else:
+            self.results.pop('put', None)
+            self.put_result.setPlainText('Filter / Sort 已保存。点击“筛选卖出 Put”抓取并分析。')
+            self.export_button.setEnabled(bool(self.results))
+            self.status.setText('设置已保存；尚未重新抓取行情。')
 
     def cancel(self):
         if self.process:

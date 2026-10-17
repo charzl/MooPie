@@ -28,6 +28,7 @@ def main():
     process = subprocess.run([str(binary), 'research', 'trend', 'AAPL', '--port', '1', '--output', str(result)], timeout=30)
     import json
     assert process.returncode == 1 and json.loads(result.read_text(encoding='utf-8'))['error']
+    subprocess.run([sys.executable, str(ROOT/'scripts/smoke-research.py'), str(binary)], check=True, timeout=150)
     shutil.make_archive(str(app/'dist/MooPie-windows-x64'), 'zip', root_dir=app/'dist', base_dir='MooPie')
 
 

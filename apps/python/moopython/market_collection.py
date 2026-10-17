@@ -160,7 +160,12 @@ def collect(sdk, context, symbols, months=3):
             'snapshot_update_time is the broker snapshot timestamp, not a guaranteed bid timestamp.',
             'Earnings dates are provider listings and may be estimated or change.',
         ]))
-    result.update(service.daily_bars(symbols, session_date, cutoff=result['collected_at']))
+    try:
+        result.update(service.daily_bars(symbols, session_date, cutoff=result['collected_at']))
+    except Exception as error:
+        # Preserve option data even when history/calendar permission is missing.
+        # Enabled trend filters still reject this; users can explicitly turn them off.
+        result['daily_series'] = [dict(symbol=code, error=str(error)) for code in symbols]
     return result
 
 

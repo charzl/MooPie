@@ -14,4 +14,5 @@ result=output.with_suffix('.research-error.json')
 result.unlink(missing_ok=True)
 process=subprocess.run([str(binary),'research','trend','AAPL','--port','1','--output',str(result)],timeout=30)
 assert process.returncode==1 and json.loads(result.read_text(encoding='utf-8'))['error'], 'Research error protocol failed'
+subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('smoke-research.py')),str(binary)],check=True,timeout=150)
 print(f'Packaged launch and render passed: {app.name}')
