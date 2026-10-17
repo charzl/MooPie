@@ -1,6 +1,6 @@
 # Agent 安装与使用指南
 
-目标：以最少步骤把仓库安装为可验证的行情工具。日常入口是 `./setup.sh` 和 `./moomoo`，人类使用说明见 [README.md](README.md)。
+目标：以最少步骤把仓库安装为可验证的行情工具。macOS 日常入口是 `./setup.sh` 和 `./moomoo`，Windows 为 `setup.ps1` 和 `moomoo.ps1`，人类使用说明见 [README.md](README.md)。
 
 ## 1. 先检查，不重复安装
 
@@ -19,6 +19,8 @@ command -v uv
 
 项目要求 Python `>=3.14,<3.15`。默认安装 CLI/MCP，桌面是可选功能。不修改系统 Python，不要求用户手动激活虚拟环境。以 `apps/python/pyproject.toml` 和 `requirements.txt` 为依赖依据，更新版本时同步检查构建依赖。
 
+Windows 使用 PowerShell；不要把 Bash 脚本作为 Windows 原生入口。Windows 虚拟环境解释器为 `apps/python/.venv/Scripts/python.exe`，macOS 为 `.venv/bin/python`。
+
 ## 2. 安装
 
 缺少 uv 时，Mac 可用 `brew install uv`；其他环境使用 [uv 官方安装说明](https://docs.astral.sh/uv/getting-started/installation/)。然后：
@@ -26,6 +28,15 @@ command -v uv
 ```sh
 ./setup.sh
 ```
+
+Windows 缺少 uv 时用 `winget install --id=astral-sh.uv -e`，重开终端后运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 doctor
+```
+
+使用局部子进程执行策略，不修改全局 PowerShell 策略。日常命令参数与 macOS 一致；Windows 桌面安装使用 `setup.ps1 -Desktop`。
 
 脚本准备或复用 `apps/python/.venv`，由 uv 找到/下载 Python 3.14，并安装本项目及 MCP 依赖。优先复用已安装/缓存的依赖，缓存不足再联网。已有错误版本的虚拟环境会保留并报错，不自动删除重建。
 
@@ -73,6 +84,8 @@ codex mcp list
 codex mcp add moomoo-market-data -- "$(pwd -P)/moomoo" mcp
 codex mcp get moomoo-market-data
 ```
+
+Windows 注册使用绝对 `apps/python/.venv/Scripts/python.exe`，参数为 `-X utf8 -m moopython.market_mcp`，不要让 MCP 宿主直接执行 `.ps1`。对应完整命令见 README。
 
 同名服务存在时先检查路径和参数，不盲目覆盖。可合并下面的 TOML 到 Codex `~/.codex/config.toml`，使用实际绝对路径；与 CLI 添加方式选一种：
 
@@ -124,6 +137,8 @@ PYTHONPATH=apps/python apps/python/.venv/bin/python -m unittest discover -s apps
 apps/python/.venv/bin/python -m unittest discover -s modules/put-screener/tests -v
 PYTHONPATH=apps/python apps/python/.venv/bin/python -m unittest discover -s apps/python/tests/mcp -v
 ```
+
+跨平台工作流 `.github/workflows/client-platforms.yml` 必须同时跑 Windows 和 macOS 安装、命令、MCP、规则和 wheel。Windows 使用 PowerShell 真正执行，macOS 用 Bash；Windows 专项测试验证带空格路径、退出码与保留不完整环境。macOS 打包工作流继续负责 DMG；当前不把 wheel 称作 Windows EXE 安装器。
 
 协议测试使用合成 provider，不证明个人行情权限；`doctor` 和实际调用验证真实 OpenD。行为修改运行相应测试，文档修改检查链接和示例命令。完整 DMG 在 CI 构建，本地做必要测试和 wheel 验证即可。
 

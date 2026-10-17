@@ -6,7 +6,7 @@
 
 ## 1. 安装工具
 
-Mac 上需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。缺少 uv 时先执行 `brew install uv`。安装脚本会准备 Python **3.14**，无需自己激活虚拟环境。
+需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。macOS 缺少 uv 时运行 `brew install uv`；Windows 用 `winget install --id=astral-sh.uv -e`，安装后重开终端。脚本会准备 Python **3.14**，无需自己激活虚拟环境。
 
 当前安装简化功能位于 `codex/simple-setup` 分支，首次下载对应版本：
 
@@ -17,6 +17,14 @@ cd moomoo-clients
 ```
 
 已有仓库时直接进入其根目录。主线合并该功能后可使用默认分支；切分支前保留本地未提交修改。
+
+Windows 在 PowerShell 中使用以下安装入口（上面的 clone/cd 相同）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+日常命令使用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 <命令>`；若当前会话已允许运行本地脚本，可简写为 `.\moomoo.ps1 <命令>`。上述执行策略仅作用于该子进程，无需修改全局策略。
 
 默认安装 **CLI + MCP**，不要求 Qt 桌面组件。已有环境会复用，所有依赖留在 `apps/python/.venv`。安装失败时先看具体错误，排查方法见 [agent.md](agent.md)。
 
@@ -33,6 +41,8 @@ OpenD 是行情网关；Python SDK 和 MCP 通过它读取行情。安装本仓�
 ```sh
 ./moomoo doctor
 ```
+
+Windows 对应命令：`powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 doctor`。下文命令相同，换用 Windows 入口即可；多行命令可合为一行执行。
 
 会显示 Python、SDK、MCP 版本，并请求一条 AAPL 真实股票快照。成功时显示报价及 broker 更新时间；失败时指出检查位置。可用 `./moomoo doctor --symbol AVGO --port 11111` 更换验证标的或端口。
 
@@ -87,6 +97,13 @@ codex mcp add moomoo-market-data -- "$(pwd -P)/moomoo" mcp
 codex mcp get moomoo-market-data
 ```
 
+Windows 用项目虚拟环境的绝对解释器路径注册，避免宿主依赖 PowerShell 的执行策略：
+
+```powershell
+$MoomooPython = Join-Path (Get-Location).Path "apps\python\.venv\Scripts\python.exe"
+codex mcp add moomoo-market-data -- $MoomooPython -X utf8 -m moopython.market_mcp
+```
+
 先用 `codex mcp list` 检查同名配置，已有服务时按 [agent.md](agent.md) 核对和更新。新开 agent 会话或重载 MCP，确认四个工具实际出现；Codex CLI 交互界面可用 `/mcp` 查看。[官方配置说明](https://developers.openai.com/codex/mcp/)
 
 使用 `mcpServers` JSON 的其他宿主，可配置：
@@ -101,6 +118,8 @@ codex mcp get moomoo-market-data
   }
 }
 ```
+
+Windows JSON 配置把 `command` 换成实际 `C:/.../apps/python/.venv/Scripts/python.exe`，`args` 使用 `["-X", "utf8", "-m", "moopython.market_mcp"]`。
 
 替换为实际仓库绝对路径。MCP 服务由宿主按需启动；手动运行 `./moomoo mcp` 后等待输入是正常状态，它不是 HTTP 服务，也不会主动打印行情。
 
@@ -119,7 +138,9 @@ codex mcp get moomoo-market-data
 ./moomoo desktop
 ```
 
-也可从成功的 GitHub Actions 或 Releases 下载 `MooPie-macos-arm64`，打开 DMG 并拖到 Applications。打包应用的 OpenD 管理器可独立下载、验签和启动官方 OpenD；仍需在其官方窗口登录。DMG 不会替 agent 宿主注册 MCP。
+Windows 对应 `setup.ps1 -Desktop` 和 `moomoo.ps1 desktop`。CLI/MCP 与 wheel 在 Windows 和 macOS 各自的 CI runner 验证；Windows 当前提供 Python wheel，尚不生成桌面 EXE 安装器。
+
+macOS 也可从成功的 GitHub Actions 或 Releases 下载 `MooPie-macos-arm64`，打开 DMG 并拖到 Applications。打包应用的 OpenD 管理器可独立下载、验签和启动官方 OpenD；仍需在其官方窗口登录。DMG 不会替 agent 宿主注册 MCP。
 
 ## 开发与更多说明
 
@@ -132,3 +153,5 @@ codex mcp get moomoo-market-data
 - [第三方许可](THIRD_PARTY.md)
 
 完整 DMG 交给 GitHub CI 构建；本地做开发、必要测试和 wheel 验证。CI 不登录个人 OpenD，真实数据权限以本机 `doctor` 和实际 MCP 调用为准。
+
+跨平台 CI 见 [client-platforms.yml](.github/workflows/client-platforms.yml)：**Windows / install, test and wheel** 与 **macOS / install, test and wheel** 独立运行，验证安装、无 Qt 默认依赖、命令、MCP、规则和 wheel。每个平台产物分别保存；macOS DMG 另由现有打包工作流生成。

@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+@unittest.skipIf(os.name == 'nt', 'Bash launcher checks; Windows has native PowerShell checks')
 class SetupToolsTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='moomoo install ')

@@ -61,6 +61,8 @@ MCP host 配置示例（替换成自己的绝对路径）：
 }
 ```
 
+Windows 使用 `setup.ps1` / `moomoo.ps1`，MCP 宿主直接启动 `apps/python/.venv/Scripts/python.exe -X utf8 -m moopython.market_mcp`。详见根目录 README 的平台步骤。
+
 服务使用本地 stdio；所有 SDK 诊断信息走 stderr。启动和工具发现不连接 broker；第一次读取时才连接已登录的本机 OpenD。没有在用户的 MCP host 中自动注册或修改配置。
 
 | MCP 工具 | 基础接口 | 返回内容 |
