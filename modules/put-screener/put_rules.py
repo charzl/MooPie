@@ -362,6 +362,7 @@ def scan(dataset, budget=None, configuration=None):
     filters = configured_rules(RULES, config['filters'])
     trend_filters = configured_rules(TREND_RULES, config['trend_filters'])
     order = config['sort_order']
+    reference_earnings_buffer = next((value for rid, _, _, value in RULES if rid == 'earnings-buffer'), 3)
     if not isinstance(dataset, dict) or type(dataset.get('schema')) is not int or dataset['schema'] != 1:
         raise ValueError('Unsupported input schema')
     session = iso_date(dataset.get('session_date'))
@@ -412,7 +413,7 @@ def scan(dataset, budget=None, configuration=None):
             eligible = all(rule['passed'] for rule in evidence)
             warnings = []
             if not values['earnings_known']: warnings.append('财报日期或日历完整性未验证')
-            elif values['days_expiry_before_earnings'] < 3: warnings.append('合约跨越或临近已知财报日')
+            elif values['days_expiry_before_earnings'] < reference_earnings_buffer: warnings.append('合约跨越或临近已知财报日')
             if underlying['status'] != 'ok': warnings.append('历史日线无法验证')
             elif underlying.get('baseline_failed_rules'): warnings.append('标的未通过默认趋势检查')
             if not values['same_session_snapshot']: warnings.append('报价不属于当前交易日')
@@ -488,14 +489,15 @@ def main(argv=None):
         config = json.loads(args.config.read_text(encoding='utf-8')) if args.config else None
         report = scan(json.loads(args.input.read_text(encoding='utf-8')), args.budget, config)
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + '\n')
+        args.output.write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2) + '\n', encoding='utf-8')
         if args.csv_output:
             import csv
             columns = ['category', 'rank', 'code', 'symbol', 'expiration', 'bid', 'ask', 'days_to_expiry',
                        'abs_delta', 'otm_pct', 'spread_pct_of_mid', 'volume', 'open_interest',
                        'premium_per_contract_before_costs', 'cash_collateral', 'gross_return_pct',
                        'annualized_gross_return_pct', 'breakeven_before_costs', 'max_loss_before_costs',
-                       'pnl_at_spot_minus_20_pct', 'live_review_ready', 'snapshot_update_time', 'blocked_rules']
+                       'pnl_at_spot_minus_20_pct', 'live_review_ready', 'snapshot_update_time', 'blocked_rules',
+                       'earnings_known', 'trend_allowed', 'warnings']
             args.csv_output.parent.mkdir(parents=True, exist_ok=True)
             with args.csv_output.open('w', encoding='utf-8', newline='') as stream:
                 writer = csv.DictWriter(stream, fieldnames=columns, extrasaction='ignore')
@@ -504,7 +506,7 @@ def main(argv=None):
                     for row in candidates:
                         writer.writerow(dict(row['metrics'], **{k: row[k] for k in ('code', 'symbol', 'expiration', 'live_review_ready', 'snapshot_update_time')},
                                              category=category, rank=row.get('rank', row.get('watchlist_rank')),
-                                             blocked_rules=','.join(row['failed_rules'])))
+                                             blocked_rules=','.join(row['failed_rules']), warnings='; '.join(row.get('warnings', []))))
         print(f'{report["qualified_count"]} / {report["total_contracts"]} contracts pass every rule; session {report["session_date"]}')
         print('Research ranking; gross estimates before costs. Refresh quotes and confirm earnings before any trade.')
         for symbol, underlying in report['underlyings'].items():

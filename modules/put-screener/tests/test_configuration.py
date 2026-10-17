@@ -94,3 +94,18 @@ class ConfigurationTests(unittest.TestCase):
                        {'sort_order': [['bid', 'desc'], ['bid', 'asc']]},
                        {'trend_filters': {'rsi-floor': {'threshold': 101}}}):
             with self.subTest(config=config), self.assertRaises(ValueError): rules.scan(self.dataset, configuration=config)
+
+    def test_cli_csv_preserves_unknown_earnings_warning_after_explicit_override(self):
+        import csv, subprocess, sys, tempfile
+        self.row['earnings'] = None
+        config = dict(filters={rid: dict(enabled=False) for rid in rules.EARNINGS_RULES})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); source = root/'input.json'; settings = root/'filters.json'
+            output = root/'output.json'; csv_output = root/'ranking.csv'
+            source.write_text(json.dumps(self.dataset), encoding='utf-8'); settings.write_text(json.dumps(config))
+            result = subprocess.run([sys.executable, '-X', 'utf8', str(ROOT/'put_rules.py'), str(source),
+                '--config', str(settings), '--output', str(output), '--csv-output', str(csv_output)], capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with csv_output.open(encoding='utf-8', newline='') as stream: row = next(csv.DictReader(stream))
+            self.assertEqual(row['earnings_known'], '0')
+            self.assertIn('财报日期或日历完整性未验证', row['warnings'])
