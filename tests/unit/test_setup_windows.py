@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import unittest
 
@@ -23,7 +24,9 @@ class WindowsSetupTests(unittest.TestCase):
         shutil.copy2(Path(sys.prefix)/'pyvenv.cfg', self.environment/'pyvenv.cfg')
         rules = self.root/'modules/put-screener'; rules.mkdir(parents=True)
         for name in ('put_rules.py', 'example.json'): shutil.copy2(ROOT/'modules/put-screener'/name, rules/name)
-        self.env = dict(os.environ, PYTHONUTF8='1')
+        # Relocated Python needs the installed dependencies from the real venv.
+        self.env = dict(os.environ, PYTHONUTF8='1',
+                        PYTHONPATH=os.pathsep.join(filter(None, [sysconfig.get_path('purelib'), os.environ.get('PYTHONPATH')])))
 
     def tearDown(self): self.temp.cleanup()
 
