@@ -8,10 +8,12 @@ import tempfile
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QFileDialog, QMessageBox)
+    QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QFileDialog, QMessageBox,
+    QDialog, QDialogButtonBox)
 
 from .market_collection import us_symbols
 from .runtime import OpenDRuntime
+from .research_explanation import explanation_html, rules_html
 
 STYLE = '''
 QWidget {background:#10171e;color:#e8eef2;font-size:14px;font-family:"Noto Sans SC";}
@@ -28,14 +30,6 @@ QScrollBar:vertical {background:#16212b;width:8px;}
 QScrollBar::handle:vertical {background:#425767;border-radius:4px;min-height:24px;}
 QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {height:0px;}
 '''
-
-RULE_LABELS = {'underlying-trend': '标的趋势不符合要求', 'earnings-checked': '财报日期未确认',
-    'earnings-buffer': '财报安全间隔不足或未知', 'min-days': '到期不足 21 天', 'max-days': '到期超过 60 天',
-    'otm-buffer': '价外幅度不足', 'min-delta': 'Delta 太低', 'max-delta': 'Delta 太高',
-    'spread': '买卖价差过大', 'volume': '成交量不足', 'open-interest': '未平仓量不足',
-    'bid-size': '买方报价数量不足', 'min-bid': '权利金不足', 'same-session-snapshot': '报价不属于当前交易日',
-    'standard-contract': '不是标准合约', 'not-suspended': '合约停牌'}
-
 
 def esc(value):
     return html.escape(str(value))
@@ -85,6 +79,9 @@ class ResearchWindow(QMainWindow):
         settings_row = QHBoxLayout()
         hint = QLabel('美股 · 未来三个月期权 · 现金担保 Put'); hint.setObjectName('muted')
         settings_row.addWidget(hint); settings_row.addStretch()
+        self.rules_button = QPushButton('筛选条件')
+        self.rules_button.clicked.connect(self.show_rules)
+        settings_row.addWidget(self.rules_button)
         settings_row.addWidget(QLabel('OpenD 端口'))
         self.port = QSpinBox(); self.port.setRange(1, 65535); self.port.setValue(port)
         settings_row.addWidget(self.port)
@@ -218,21 +215,29 @@ class ResearchWindow(QMainWindow):
                 content += f'<p>合约快照：{esc(best["snapshot_update_time"])} · 纽约时间</p>'
                 if not best['live_review_ready']: content += '<p><b>休市或快照较旧，仅供研究；交易前需刷新报价。</b></p>'
             else:
-                from collections import Counter
-                counts = Counter(rule for row in report['results'] for rule in row.get('failed_rules', []))
-                invalid = sum(row['status'] == 'invalid_data' for row in report['results'])
                 content += '<h3>没有符合当前规则的 Put</h3><p>不自动放宽规则。</p>'
-                content += ''.join(f'<p>{esc(RULE_LABELS.get(rule, rule))}：{count} 个未通过</p>' for rule, count in counts.most_common(5))
-                if invalid: content += f'<p>数据不足或无效：{invalid} 个合约</p>'
                 unknown = len(report['earnings_unverified_watchlist'])
                 if unknown: content += f'<p>{unknown} 个合约仅因财报日期尚未验证，保留在导出结果的观察名单中。</p>'
             missing = len(report['missing_quote_codes'])
             if missing: content += f'<p>另有 {missing} 个合约缺少报价，未参与排名。</p>'
             if report['calendar_errors']: content += '<p>财报日历读取不完整，相关合约无法通过财报检查。</p>'
+            content += explanation_html(report)
             content += f'<p>交易日 {esc(report["session_date"])} · 规则 {esc(report["ruleset_version"])}</p><p>按一张标准合约全额现金担保计算；未校验个人资金预算。收益不含费用、不保证成交，规则尚未经回测。</p>'
         self.panel(action).setHtml(heading + content)
         self.status.setText('抓取完成：' + result['collected_at'] + ' · 可导出完整指标和规则证据')
         self.export_button.setEnabled(True)
+
+    def show_rules(self):
+        dialog = QDialog(self); dialog.setWindowTitle('Put 筛选条件'); dialog.resize(780, 700)
+        layout = QVBoxLayout(dialog); browser = QTextBrowser()
+        report = self.results.get('put', {}).get('report')
+        if report is None:
+            from .research import load_rules
+            rules = load_rules()
+            report = dict(rules=rules.RULES, trend_rules=rules.TREND_RULES, sort_order=rules.SORT_ORDER)
+        browser.setHtml(rules_html(report)); layout.addWidget(browser)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(dialog.reject); layout.addWidget(buttons); dialog.exec()
 
     def cancel(self):
         if self.process:

@@ -152,6 +152,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
 
 两个结果均标注股票、数据时间，可导出完整 JSON。查询在独立进程运行，可以取消；输入另一只股票会清空旧结果。默认连接本机 OpenD，界面可改端口。无需配置 MCP 或外部 AI API Key。
 
+点「筛选条件」可在查询前查看当前实际阈值。查询后，Put 面板逐项显示趋势的实际值、阈值与通过情况，以及每条合约条件排除了多少份合约；数据无效和规则未通过分开解释，各项数量可能重叠。IV=0 作为未知展示，IV 不参与当前排序；Bid/Ask、Delta 和趋势等必要数据仍须有效。
+
 Put 排序依据保留在 [put_rules.py](modules/put-screener/put_rules.py)，趋势解释在同文件的 `describe_trend()`。源码运行修改后立即生效；wheel 和桌面分发包带构建时的规则快照，修改后需要重新打包。原有行情面板可用 `./moomoo desktop --classic` 打开。
 
 Windows 可在成功的 **Client platform CI** 中下载 `moomoo-tools-Windows`，取其中 `MooPie-windows-x64.zip`，完整解压后双击文件夹内的 `MooPie.exe`。这是便携版，不是安装向导；不需要另装 Python，但仍需安装并登录官方 OpenD。

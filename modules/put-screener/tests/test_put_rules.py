@@ -46,6 +46,17 @@ class PutRuleTests(unittest.TestCase):
         self.dataset['collected_at'] = '2026-10-16T20:06:00+00:00'
         self.assertTrue(rules.scan(self.dataset)['ranked'][0]['live_review_ready'])
 
+    def test_optional_zero_iv_is_unknown_without_bypassing_required_delta(self):
+        self.row['iv_pct'] = 0
+        result = rules.scan(self.dataset)['ranked'][0]
+        self.assertIsNone(result['metrics']['iv_pct'])
+        self.row['delta'] = 0
+        report = rules.scan(self.dataset)
+        self.assertFalse(report['ranked'])
+        self.assertIn('min-delta', report['results'][0]['failed_rules'])
+        self.row['iv_pct'] = -1
+        self.assertEqual(rules.scan(self.dataset)['results'][0]['status'], 'invalid_data')
+
     def test_missing_earnings_remain_blocked_in_separate_watchlist(self):
         self.row['earnings'] = None
         report = rules.scan(self.dataset)

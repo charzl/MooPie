@@ -54,6 +54,10 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('没有符合', self.window.put_result.toPlainText())
         self.assertIn('财报日期尚未验证', self.window.put_result.toPlainText())
         self.assertNotIn('现金担保要求', self.window.put_result.toPlainText())
+        self.assertIn('趋势条件', self.window.put_result.toPlainText())
+        self.assertIn('实际值', self.window.put_result.toPlainText())
+        self.assertIn('RSI14', self.window.put_result.toPlainText())
+        self.assertIn('合约条件逐项检查', self.window.put_result.toPlainText())
 
     def test_closed_port_runs_async_and_displays_error_instead_of_fake_results(self):
         with socket.socket() as reserved:

@@ -14,8 +14,8 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.2.1'
-RULESET_VERSION = '1.1.0'
+ENGINE_VERSION = '0.2.2'
+RULESET_VERSION = '1.1.1'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # All must pass BEFORE comparing put premiums. Oversold alone is not a buy signal.
 TREND_RULES = [
@@ -245,7 +245,8 @@ def metrics(row, session_date, collected_at):
     iv = row.get('iv_pct')
     if iv is not None:
         iv = finite(iv, 'iv_pct')
-        if iv <= 0: raise ValueError('Invalid implied volatility')
+        if iv == 0: iv = None  # Broker's unavailable-IV sentinel; IV is optional.
+        elif iv < 0: raise ValueError('Invalid implied volatility')
     return dict(
         bid=bid, ask=ask, shares=int(shares), strike=strike, underlying_price=spot,
         days_to_expiry=dte, abs_delta=abs(delta), iv_pct=iv, **liquidity,
