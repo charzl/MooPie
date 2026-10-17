@@ -196,6 +196,24 @@ class MarketDataService:
         return clean(dict(schema=1, source='moomoo OpenD', collected_at=datetime.now(timezone.utc).isoformat(),
                           codes=codes, rows=rows, missing_codes=[code for code in codes if code not in present]))
 
+    def basic_info(self, codes):
+        """Authoritative symbol/type/delisting metadata; does not require quotes."""
+        codes = us_symbols(codes, maximum=200)
+        rows = records(self.sdk, self.context.get_stock_basicinfo(self.sdk.Market.US, code_list=codes))
+        present = {row['code'] for row in rows}
+        return clean(dict(schema=1, source='moomoo OpenD get_stock_basicinfo',
+                          collected_at=datetime.now(timezone.utc).isoformat(), codes=codes,
+                          rows=rows, missing_codes=[code for code in codes if code not in present]))
+
+    def security_directory(self):
+        """US stock/ETF identities only; no quotes, options or subscriptions."""
+        rows = []
+        for kind in (self.sdk.SecurityType.STOCK, self.sdk.SecurityType.ETF):
+            rows.extend(records(self.sdk, self.context.get_stock_basicinfo(
+                self.sdk.Market.US, stock_type=kind)))
+        return clean(dict(source='moomoo OpenD get_stock_basicinfo',
+                          collected_at=datetime.now(timezone.utc).isoformat(), rows=rows))
+
     def option_chain(self, symbol, months=3, option_type='PUT', start=None, end=None):
         code = us_symbols([symbol])[0]
         return clean(self.chains.query(OptionQuery.upcoming(code, months, option_type, start, end)))

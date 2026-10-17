@@ -36,9 +36,12 @@ def analyze_put_dataset(dataset, symbol, configuration=None, top_n=10):
     code = us_symbols([symbol])[0]
     owners = set(dataset.get('symbols', [])) | {r.get('symbol') for r in dataset.get('contracts', [])}
     if owners and owners != {code}: raise ValueError('Cached dataset does not match the requested stock')
-    report = load_rules().recommend(dataset, configuration=configuration, top_n=top_n)
-    return dict(action='put', symbol=code, collected_at=dataset['collected_at'],
-                report=report, input_dataset=dataset)
+    report = load_rules().recommend(dataset, configuration=configuration, top_n=top_n, per_symbol_limit=20)
+    result = dict(action='put', symbol=code, collected_at=dataset['collected_at'],
+                  report=report, input_dataset=dataset)
+    if 'data_access' in dataset:
+        result['data_access'] = dataset['data_access']
+    return result
 
 
 def run_research(service, symbol, action, configuration=None, top_n=10):
@@ -46,8 +49,11 @@ def run_research(service, symbol, action, configuration=None, top_n=10):
     rules = load_rules()
     if action == 'trend':
         payload = service.daily_bars([code])
-        return dict(action=action, symbol=code, collected_at=payload['fetched_at'],
-                    trend=trend_report(payload, code, rules))
+        result = dict(action=action, symbol=code, collected_at=payload['fetched_at'],
+                      trend=trend_report(payload, code, rules))
+        if 'data_access' in payload:
+            result['data_access'] = payload['data_access']
+        return result
     if action != 'put':
         raise ValueError('Unknown research action: ' + action)
     dataset = service.collect_put_dataset([code], months=3)

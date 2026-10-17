@@ -1,0 +1,6 @@
+CREATE TABLE watchlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL UNIQUE,
+    added_at TEXT NOT NULL,
+    source TEXT NOT NULL
+);

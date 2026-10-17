@@ -59,6 +59,8 @@ Windows 的 `command` 换成 `C:/.../apps/python/.venv/Scripts/python.exe`，`ar
 
 宿主启动子进程，通过 stdin / stdout 收发协议。手动运行 `./moomoo mcp` 等待输入是正常现象，它不会主动打印行情，也不监听 HTTP 端口。SDK 日志走 stderr。
 
-工具请求由适配层串行执行并留限流间隔；多个进程仍共享券商限额。优先小批量查询，完整 Put 研究用 `collect` 写文件再离线分析。MCP 与 CLI 共用抓取服务，后续增加存储层无需另写采集逻辑。
+四个工具默认盘中连接 OpenD 并保存 SQLite，盘后直接查数据库，缺失时报错。需要盘后主动抓取时加 `"refresh":true`；返回 `data_access` 说明来源和原始时间。宿主可设置 `MOOMOO_DB_PATH` 与桌面共享同一数据库，见[数据库说明](database.md)。
+
+实际 OpenD 请求由适配层串行执行并留限流间隔，数据库读取不等待限流；多个进程仍共享券商限额。优先小批量查询，完整 Put 研究用 `collect` 写文件再离线分析。MCP 与 CLI 共用抓取、路由和存储服务。
 
 协议测试使用合成 provider，不能证明真实账号权限。宿主尚未加载工具时，可验证同一 stdio 服务的协议或继续使用 CLI，但交付时应说明实际调用路径。

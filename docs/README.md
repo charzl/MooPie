@@ -15,8 +15,10 @@
 | --- | --- |
 | [Agent 工作流](guides/agent-workflows.md) | agent 如何检查环境、调用工具、解析结果并交付 |
 | [筛选卖出 Put](guides/put-screening.md) | 先 Filter、再 Sort、最后取 Top 5/10/20 |
+| [Watchlist 与预检查](guides/watchlists.md) | 验证全部股票代码，再逐只返回 Put / 走势 |
 | [分析股票趋势](guides/trend-analysis.md) | 获取已完成日线，解释走势证据和改判条件 |
 | [配置 MCP](guides/mcp-server.md) | 接入本地 stdio 服务，分别验证配置、发现和调用 |
+| [数据库与盘中 / 盘后查询](guides/database.md) | SQLite 路由、主动刷新、数据时点与历史保留 |
 | [测试与真实行情验证](guides/functional-testing.md) | 哪些检查离线运行，哪些需要已登录 OpenD |
 | [GitHub、CI 与交付](guides/github-workflows.md) | 本地批量开发、检查 PR、区分构建和发布 |
 | [排查问题](guides/troubleshooting.md) | 安装失败、连接失败、空结果、旧数据和打包问题 |
@@ -39,4 +41,4 @@
 - [任务指南模板](contributing/templates/how-to.md)、[接口参考模板](contributing/templates/reference.md)、[故障排查模板](contributing/templates/troubleshooting.md)、[变更说明模板](contributing/templates/change-notes.md)。
 - [agent.md](../agent.md) 是 agent 的约束与安装入口，[README](../README.md) 是用户入口。
 
-任务指南中的步骤说明当前已实现的操作；数据库、自动清理等后续设想会明确标为未实现。现有规则与评分文档保留为详细依据，其他页面通过链接引用，避免维护多套公式。
+任务指南中的步骤说明当前已实现的操作；后续设想会明确标为未实现。现有规则与评分文档保留为详细依据，其他页面通过链接引用，避免维护多套公式。

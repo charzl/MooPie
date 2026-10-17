@@ -24,7 +24,7 @@ class PublicationTests(unittest.TestCase):
                              sdk=dict(version='10.11.7108'), opend=dict(version='10.11.7108'),
                              release_tag='build-' + self.commit[:12] + '-sdk10.11.7108-opend10.11.7108')
         self.write('resolved-build.json', self.manifest)
-        for client, prefix in zip(release.CLIENTS, ('python', 'swift-cpp')):
+        for client, prefix in release.CLIENT_BUILDS:
             image = self.root / (client + '-macos-arm64.dmg')
             image.write_bytes(b'x' * 4096 + b'koly' + b'\0' * 508)
             self.write(image.with_suffix('.validation.json').name,

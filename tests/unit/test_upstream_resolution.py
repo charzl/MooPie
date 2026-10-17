@@ -5,7 +5,7 @@ spec=importlib.util.spec_from_file_location('upstream',ROOT/'scripts/resolve-ups
 class UpstreamResolutionTests(unittest.TestCase):
  def setUp(self):
   self.directory=tempfile.TemporaryDirectory();self.root=pathlib.Path(self.directory.name);(self.root/'runtime').mkdir()
-  self.sdk=dict(version='10.11.7108',cpp=dict(url='https://softwaredownload.moomoo.com/MMAPI4CPP_10.11.7108.7z',sha256='a'*64),python=dict(url='https://files.pythonhosted.org/sdk.tar.gz',sha256='b'*64))
+  self.sdk=dict(version='10.11.7108',python=dict(url='https://files.pythonhosted.org/sdk.tar.gz',sha256='b'*64))
   self.opend=dict(version='10.11.7108',url='https://softwaredownload.moomoo.com/moomoo_OpenD_10.11.7108_Mac.tar.gz',sha256='c'*64)
   (self.root/'runtime/sdk.json').write_text(json.dumps(self.sdk));(self.root/'runtime/opend.json').write_text(json.dumps(self.opend))
   self.root_patch=patch.object(upstream,'ROOT',self.root);self.root_patch.start();self.commit='d'*40
@@ -17,13 +17,13 @@ class UpstreamResolutionTests(unittest.TestCase):
  def test_unchanged_version_retains_known_hashes(self):
   with patch.object(upstream,'get_json',return_value={'info':{'version':'10.11.7108'}}),patch.object(upstream,'latest_opend',return_value='10.11.7108'),patch.object(upstream,'digest_url',side_effect=AssertionError('download called')):
    result=upstream.resolve(True,self.commit);upstream.fill_hashes(result)
-  self.assertEqual(result['sdk']['cpp']['sha256'],'a'*64)
- def test_matching_new_release_resolves_both_sdks_and_opend(self):
+  self.assertEqual(result['sdk']['python']['sha256'],'b'*64)
+ def test_matching_new_release_resolves_python_sdk_and_opend(self):
   responses=[{'info':{'version':'11.0.7200'}},{'urls':[{'packagetype':'sdist','url':'https://files.pythonhosted.org/new-sdk.tar.gz','digests':{'sha256':'e'*64}}]}]
   with patch.object(upstream,'get_json',side_effect=responses),patch.object(upstream,'latest_opend',return_value='11.0.7200'),patch.object(upstream,'digest_url',return_value='f'*64):
    result=upstream.resolve(True,self.commit);upstream.fill_hashes(result)
   self.assertEqual(result['sdk']['version'],'11.0.7200');self.assertEqual(result['opend']['version'],'11.0.7200')
-  self.assertIn('MMAPI4CPP_11.0.7200.7z',result['sdk']['cpp']['url']);self.assertEqual(result['sdk']['python']['sha256'],'e'*64)
+  self.assertEqual(set(result['sdk']),{'version','python'});self.assertEqual(result['sdk']['python']['sha256'],'e'*64)
  def test_downgrade_and_sdk_ahead_of_opend_are_rejected(self):
   for sdk,opend in [('10.10.7008','10.11.7108'),('10.11.7108','10.10.7008'),('11.0.7200','10.11.7108')]:
    with patch.object(upstream,'get_json',return_value={'info':{'version':sdk}}),patch.object(upstream,'latest_opend',return_value=opend):
@@ -39,5 +39,5 @@ class UpstreamResolutionTests(unittest.TestCase):
    with patch.object(upstream,'get_json',side_effect=[{'info':{'version':'11.0.7200'}},{'urls':files}]),patch.object(upstream,'latest_opend',return_value='11.0.7200'):
     with self.assertRaises(RuntimeError):upstream.resolve(True,self.commit)
  def test_invalid_artifact_checksum_is_rejected(self):
-  item=dict(self.sdk);item['cpp']={**self.sdk['cpp'],'sha256':'wrong'}
+  item=dict(self.sdk);item['python']={**self.sdk['python'],'sha256':'wrong'}
   with self.assertRaises(ValueError):upstream.fill_hashes(dict(sdk=item,opend=self.opend))

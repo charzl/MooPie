@@ -27,7 +27,7 @@ class ResearchTests(unittest.TestCase):
         service = self.service(); code = self.dataset['contracts'][0]['symbol']
         result = run_research(service, code, 'put')
         self.assertEqual(service.query, ([code], 3))
-        self.assertEqual(result['report'], load_rules().recommend(self.dataset))
+        self.assertEqual(result['report'], load_rules().recommend(self.dataset, per_symbol_limit=20))
         self.dataset['contracts'][0]['bid'] = 0
         self.assertFalse(run_research(self.service(), code, 'put')['report']['ranked'])
 

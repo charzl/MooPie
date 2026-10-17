@@ -36,6 +36,18 @@ class SetupToolsTests(unittest.TestCase):
         self.assertEqual(result.stdout.splitlines(), ['-m','moopython.market_data_cli','AVGO','--output','my data/input.json'])
         self.assertFalse(self.log.exists())
 
+    def test_database_cleanup_dispatch_preserves_arguments(self):
+        result = subprocess.run([str(self.root/'moomoo'), 'db', 'cleanup', '--older-than-days', '180', '--dry-run'],
+                                cwd='/', env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ['-m', 'moopython.database_cli', 'cleanup', '--older-than-days', '180', '--dry-run'])
+
+    def test_watchlist_dispatch_preserves_json_path_with_spaces(self):
+        result = subprocess.run([str(self.root/'moomoo'), 'watchlist', 'my lists/watchlist.json', '--check-only'],
+                                cwd='/', env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ['-m', 'moopython.watchlist_cli', 'my lists/watchlist.json', '--check-only'])
+
     def test_reinstall_reuses_environment_and_desktop_is_explicit(self):
         for args in ([], ['--desktop']):
             result = subprocess.run([str(self.root/'setup.sh'),*args],cwd='/',env=self.env,capture_output=True,text=True)

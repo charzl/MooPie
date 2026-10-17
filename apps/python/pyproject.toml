@@ -14,6 +14,8 @@ moomoo-options = "moopython.options_cli:main"
 moomoo-data = "moopython.market_data_cli:main"
 moomoo-mcp = "moopython.market_mcp:main"
 moomoo-research = "moopython.research_cli:main"
+moomoo-db = "moopython.database_cli:main"
+moomoo-watchlist = "moopython.watchlist_cli:main"
 
 [project.gui-scripts]
 moomoo-desktop = "moopython.research_ui:main"
@@ -29,4 +31,5 @@ dependencies = {file = ["requirements.txt"]}
 include = ["moopython*"]
 
 [tool.setuptools.package-data]
-moopython = ["fonts/*"]
+moopython = ["fonts/*", "data/*.json"]
+"moopython.database" = ["migrations/*.sql", "schema.sql"]

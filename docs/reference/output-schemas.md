@@ -14,9 +14,12 @@
 | `contracts` | 合约身份、Bid/Ask、Delta、股价、财报及快照时间等标准化字段 |
 | `missing_quote_codes`、`calendar_errors` | 缺失报价和财报查询失败，不能默认为无风险 |
 | `daily_series` | 每只股票的已完成日线或明确错误 |
+| `data_access` | 查询来源（`OpenD` / `database`）、快照ID、原始采集时间、时段判定及缓存说明；不修改报价时点 |
 | `trend_as_of`、`trend_decision_cutoff`、`trend_collected_at` | 日线可用日期、决策截止点和获取时间（成功采集时） |
 
 历史补日线保留原报价时点。报价更新时间不保证 Bid 可以按该价格成交。`options` 的合约表与这里的完整输入结构不同，不能直接用于 Put 收益排名。
+
+`data_access.batch_id` 关联同批原始采集。组合多股票缓存时，`members` 列出每个股票 / 合约的原始ID、批次和采集时间；不存在共同的单个快照ID时，顶层 `snapshot_id` / `batch_id` 为 null，不能据此假设数据同时取得。顶层采集时间是最新成员时间。触发已配置的清理策略时，`data_access.cleanup` 给出截止时间及删除数量，不修改保留行情的原始日期。
 
 ## 独立引擎报告
 
@@ -29,7 +32,7 @@
 | `cash_budget`、`budget_checked` | 本次是否检查个人资金上限 |
 | `total_contracts`、`qualified_count` | 原始数量与通过全部已启用 Filter 的数量 |
 | `results` | 全部逐合约状态、指标、失败规则与证据 |
-| `ranked` | 全部合格者的当前排序 |
+| `ranked` | 独立默认报告为全部合格者；桌面 / 研究 CLI 为有界选择后的全局 Top 20 |
 | `recommendations`、`best_recommendation` | 日常推荐模式的前 N 项及第一名；空结果保留为空 |
 | `top_n_requested`、`ranking_views` | 请求数量与五种预设排序的 Top 合约代码 |
 | `expiration_comparisons` | 每个到期日的单独比较，不替换 Top 结果 |
@@ -37,6 +40,8 @@
 | `earnings_unverified_watchlist` | 财报硬条件启用时，其他条件通过但财报未验证者 |
 
 `ranked` 行包含 `metrics`、`failed_rules` 和 `scoring`；推荐项另整理日期、行权价、成本、三种分数、原因、取舍及情景。评分证据和缺失维度在 `scoring.components` 中。`--scan-only` 保留扫描报告，不添加推荐专用字段。
+
+桌面 / 研究入口调用 `recommend(..., per_symbol_limit=20)`：`qualified_count` 仍是所有合格合约的数量，不能用 `len(ranked)` 代替；`ranked_truncated` 表明是否截短。`ranking_reduction` 给出每股保留数、合并池大小及最终保留数。预设排序的 `ranking_views` 也在全部合格候选上用相同有界选择生成；`auxiliary_rank_scope=top_per_symbol_limit` 时，仅给各预设 Top 20 内的序号，其余辅助序号为 null，不虚构全局名次。`expiration_comparisons_scope=retained_candidates` 只比较保留候选中的日期。完整逐合约 Filter 证据仍在 `results`，完整行情仍在 `input_dataset`。
 
 CSV 的 `category` 区分 `qualified` 与 `earnings_unverified`，导出完整名单，不限于 Top N。把待确认名单当成合格结果会绕过硬条件。
 
@@ -52,11 +57,17 @@ report: 上述独立引擎报告
 input_dataset: 原始输入
 ```
 
-趋势研究结构为 `action: "trend"`、`symbol`、`collected_at`、`trend`；`trend.outlook` 包含文字判断。
+趋势研究结构为 `action: "trend"`、`symbol`、`collected_at`、`trend`；`trend.outlook` 包含文字判断。两种研究结果从共享查询层取得数据时还包含 `data_access`；离线 Put 重算保留输入中原有的来源信息。
 
 桌面「导出结果」会再按动作包装：顶层的 `put` 和 / 或 `trend` 对应上述单股票研究结果。重算桌面 Put 导出时提取 `exported['put']['input_dataset']`；直接保存的研究 CLI Put 结果则提取 `result['input_dataset']`。再把原始 dataset 交给 `analyze` 或研究 CLI `--input`，报告本身不能当作原始数据。
 
 研究 CLI 的已处理运行错误为 `{"error":"..."}`，参数用法错误仍是 argparse stderr；先检查退出码再解析。
+
+桌面或研究 CLI 查询整个 Watchlist 时，包装增加 `query_scope: "watchlist"`、`symbols`，`symbol` 为 `"Watchlist"`。Put 的 `input_dataset` 合并全部成功取得的原始合约，`report` 对全部合约统一排序取 Top N；趋势结果使用 `items[]` 保存逐股趋势包装。`collection_errors[]` 保留失败股票及原因，存在失败项时界面明确标记部分结果。各股票的原始采集时间保留在 `data_access.members`，不表示同时报价。
+
+## 股票名单
+
+JSON 股票名单入口的报告另外包含 `precheck`、`results[]`、`summary`；`results[]` 按股票包装上述单股研究结果，`ranking_scope=per_symbol`。完整检查状态、错误行为和字段见[股票列表指南](../guides/watchlists.md)。
 
 ## MCP
 

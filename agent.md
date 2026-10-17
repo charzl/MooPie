@@ -8,8 +8,10 @@
 | --- | --- |
 | 安装、连接、第一次运行 | [安装](docs/getting-started/installation.md)、[快速上手](docs/getting-started/quickstart.md) |
 | Put / 趋势研究 | [Put 筛选](docs/guides/put-screening.md)、[趋势分析](docs/guides/trend-analysis.md) |
+| Watchlist 与批量研究 | [Watchlist 与预检查](docs/guides/watchlists.md) |
 | 配置宿主或调 MCP | [MCP 服务](docs/guides/mcp-server.md) |
 | 查参数、配置或返回字段 | [CLI](docs/reference/cli.md)、[配置](docs/reference/configuration.md)、[输出结构](docs/reference/output-schemas.md) |
+| 盘中 / 盘后查询、本地数据库 | [数据库](docs/guides/database.md) |
 | 修改代码并交付 | [架构](docs/reference/architecture.md)、[测试](docs/guides/functional-testing.md)、[GitHub / CI](docs/guides/github-workflows.md) |
 | 排错或补文档 | [排查指南](docs/guides/troubleshooting.md)、[贡献规范与模板](docs/contributing/README.md) |
 
@@ -127,7 +129,9 @@ tool_timeout_sec = 120
 
 先做小批量请求。股票、期权、日线权限分别检查，保留 `missing_codes`、`error` 和数据时间。当前 MCP/综合采集/Put 分析支持 US，原始 `options` 命令另支持 HK。
 
-完整研究流程：
+用户提供 JSON 名单时，使用 `./moomoo watchlist LIST.json --output artifacts/watchlist/results.json`，默认同时做每股 Top 10 Put 与走势；`--top` 可选5/10/20，`--action put|trend|both`。格式为 `{"symbols":["AVGO","NVDA"]}` 或字符串数组。先做本地全表检查，再通过证券基本资料验证全部代码；重复别名只分析一次。任一无效或无法验证的代码阻止整批分析，退出码2；缓存 / 权限缺失不当成代码不存在，不自动修正或跳过失败代码。`--check-only` 仅预检查；首次可显式加 `--refresh` 刷新基本资料。全部通过后逐只研究，一只分析失败记录错误并继续，退出码1且保留其他结果。`both` 复用已采集日线。名单超过20只仍逐只处理，预检查按200个分批。Top为每股独立排名。见[名单指南](docs/guides/watchlists.md)。
+
+单次采集与离线研究流程：
 
 ```sh
 ./moomoo collect AVGO NVDA AAPL --months 3 --output artifacts/put-screen/input.json
@@ -139,7 +143,7 @@ tool_timeout_sec = 120
 
 趋势分析报告数据日期/时区、考察期限、指标值、关键价位和改判条件；只使用已完成日线，不把规则命中数当成经过校准的涨跌概率。Put 结果查看 `ranked`、财报未验证观察名单、`failed_rules`、预算及快照时间。空结果保留，不为产生候选自动放宽规则；未知财报不推断成无财报。
 
-Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(dataset, budget=None, configuration=None, top_n=10)`。主界面Top数量可选5/10/20，默认10，在完整候选排序后截取，不限制采集范围。预设支持 `duration`（到期时长升序）、`cost`（行权价×100的担保现金升序）、`return`（日均毛收益率降序）、`risk`（风险分升序）、`balanced`（综合分降序），也可自定义。严格返回 `ranked[:top_n]`，不足所选数量返回实际数量，不按到期日替换更高排名者。`ranking_views` 提供五种预设的Top代码。切换数量/排序通过 `research_cli --input --top` 离线重算完整缓存；GUI数量偏好独立保存在 `put_top_n`。日期、天数、行权价、成本及评分都由引擎返回。
+Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(dataset, budget=None, configuration=None, top_n=10)`。主界面Top数量可选5/10/20，默认10，每股选Top20再归并截取，不限制采集或Filter检查范围。预设支持 `duration`（到期时长升序）、`cost`（行权价×100的担保现金升序）、`return`（日均毛收益率降序）、`risk`（风险分升序）、`balanced`（综合分降序），也可自定义。严格返回 `ranked[:top_n]`，不足所选数量返回实际数量，不按到期日替换更高排名者。`ranking_views` 提供五种预设的Top代码。切换数量/排序通过 `research_cli --input --top` 离线重算完整缓存；GUI数量偏好独立保存在 `put_top_n`。日期、天数、行权价、成本及评分都由引擎返回。
 
 评分只在 `put_rules.py` 的 `RISK_WEIGHTS` / `SCORING_PARAMETERS` 及函数中维护，初版Delta/情景亏损/趋势/流动性/财报权重25/25/20/15/15，参考情景下跌20%。风险分含缺失信息惩罚（默认100），不是亏损概率。收益分用固定日均参考目标0.1%映射0–100，综合分为 `return_weight×收益分+(1−return_weight)×(100−风险分)`，初始0.5。全部都是未校准原型参数。可选 `min-cost` / `max-cost` / `min-daily-return` / `max-risk` / `expiry-before` 默认关闭，启用后在完整数据上先评分、再过滤、最后排序取Top。比较为严格 `>` / `<`，成本美元、日均收益百分数值、风险0–100；日期阈值为ISO日期，不包含当天。修改评分不改变Filter配置或采集时间，但启用风险分过滤时可能改变候选集合。关闭Filter不取消该项风险分，趋势评分仍使用默认参考条件。详见 [docs/put-scoring.md](docs/put-scoring.md)。
 
@@ -147,13 +151,23 @@ Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(datas
 
 新版 GUI 用独立设置键 `put_recommendation_configuration_v1`，保留旧设置且不自动继承旧全条件配置。已有新版配置继续复用，不随意重置用户选择。恢复默认 Filter 使用 `recommendation_configuration()`。趋势描述与风险提示不随过滤开关消失。
 
-桌面配置界面在 `research_controls.py`，不是第二套规则。修改配置后优先通过研究子进程的 `--input` 离线重算现有 `input_dataset`，保持原始 `collected_at`；点击主抓取按钮才刷新。股票/端口改变后丢弃缓存；导出包含数据、实际配置和证据。日线抓取失败需保留期权数据和明确错误：启用趋势 Filter 时阻止候选，用户关闭后可继续其他过滤。
+桌面配置界面在 `research_controls.py`，不是第二套规则。修改配置后优先通过研究子进程的 `--input` 离线重算现有 `input_dataset`，保持原始 `collected_at`。主查询按钮由共享路由判断盘中 / 盘后，主动「更新行情」才绕过盘后读库。股票/端口改变后丢弃界面输入；导出包含数据、实际配置和证据。日线抓取失败需保留期权数据和明确错误：启用趋势 Filter 时阻止候选，用户关闭后可继续其他过滤。
 
 桌面候选列表在 `research_table.py`，使用原生 Qt 表格，仅展示规则引擎返回值。表头点击通过配置触发完整缓存离线重算，不启用 Qt 对可见 Top N 的局部排序。点选合约后详情必须对应所选行；输入改变、重新抓取、取消或失败时清除过期候选。走势在独立页签，不需要网页服务。
 
-原始行情和分析结果写 gitignored 的 `artifacts/`。不提交账号、真实行情和本机绝对配置。数据库和旧数据清理优先级较低，基础安装时不添加数据库、定时任务或新的后台常驻服务。
+导出的行情和分析结果写 gitignored 的 `artifacts/`。不提交账号、真实行情、本机绝对配置或 SQLite 数据文件。共享查询使用 `market_repository.market_data_connection`：盘中抓取并保存，盘后读取对应交易日的匹配快照，缺失则明确要求手动刷新。`market_collection.opend_connection` 保留为实时接口，`doctor` 使用它。SQLite 为 Python 内置模块，默认放平台应用数据目录，可用 `MOOMOO_DB_PATH` 覆盖。schema4以股票、操作、交易日、原始采集时间和批次索引，支持批量 / 单股 / 重排列表复用；旧版事务迁移不丢快照。保留原始时间和 `data_access.members`，不把不同采集时点当成同时报价。
+
+使用 `./moomoo db retention --days N` 为当前数据库设置自动保留期；0为关闭。设置正数后，共享查询每天至多一次删除 `fetched_at` 严格早于 N 个自然日前的快照，读取缓存不延长寿命。用户尚未指定天数时保持关闭。`db cleanup --older-than-days N --dry-run` 可先预览，去掉 dry-run 执行一次；手动天数不改持久策略。最新日线快照内部的历史K线不被裁剪，旧采集版本按期限删除，旧报告引用不自动豁免，需要长期留存则导出完整输入。`db vacuum` 显式压缩文件，不在查询时执行。不安装定时任务或新后台服务。详见[数据库约定](docs/guides/database.md)。
 
 ## 7. 验证与交付
+
+增量更新用 `market_data_connection(update=True,max_age_seconds=60)`，与 refresh 互斥。普通查询仍盘中实时 / 盘后只读；桌面「更新行情」及 CLI --update 才补抓缺失、旧交易日或过期项。盘中报价默认60秒，边界过期；盘后必须是最近对应交易日收市后采集。身份按交易日复用，日线按最近完成交易日复用。右侧菜单「强制刷新全部」和 --refresh 保持全量强制语义。来源按成员保留，界面显示复用 / 抓取股票数。
+
+研究入口统一调用 canonical recommend(...,per_symbol_limit=20)：同一 Filter / Sort 下每股有界堆选20，再归并全局20并输出5/10/20，不完整排序所有合格者；指标和 Filter 仍检查全部原始合约。global Put 采集用 run_watchlist(raw_put=True)，避免先逐股分析后再重复全表分析。qualified_count 是全部合格数，ranked最多20，ranking_reduction说明合并池；辅助预设名次仅在其Top20内提供，其他为null。改条件从完整input_dataset重新选择；独立API省略per_symbol_limit保持完整报告。严禁把旧排序Top20当新排序全集，或给每只股票分配最终名额。
+
+桌面名称候选由 `symbol_search.py` 展示、`security_directory.py` 查询，150毫秒防抖、最多20项，精确代码 / 名称 / 别名优先，支持前缀、`*` / `?`。打字只查本地 SQLite，不导入 SDK。选中仅填代码，不自动研究或修改 Watchlist；未选定的名称 / 通配符不能猜为股票。`更新股票目录` / `./moomoo db sync-symbols` 才显式连接 OpenD，同步 US STOCK/ETF；保留更新失败前目录，记录不支持格式的 skipped。schema3 增加证券 / 别名表，旧快照和清理配置不变，资料不参加行情清理；别名允许多证券同名并保留来源，精选内置别名随包分发。CLI 名称检索用 `db search`，原研究和 JSON Watchlist 仍接受规范代码。
+
+数据库结构维护在 `apps/python/moopython/database/migrations/`，已发布迁移不修改，新增版本递增执行。迁移和旧请求元数据转换共用同一个事务，禁止使用会隐式提交的 `executescript()` 破坏回滚。`schema.sql` 是自动导出的查阅文件，不手动维护；修改迁移后运行 `apps/python/.venv/bin/python scripts/export-database-schema.py`，加 `--check` 可检查一致性。`./moomoo db schema` 只在内存生成结构，不打开行情库。版本化 SQL 和导出文件必须包含在 wheel / 桌面包中。
 
 ```sh
 PYTHONPATH=apps/python apps/python/.venv/bin/python -m unittest discover -s apps/python/tests/unit -v
@@ -163,7 +177,11 @@ PYTHONPATH=apps/python apps/python/.venv/bin/python -m unittest discover -s apps
 
 跨平台工作流 `.github/workflows/client-platforms.yml` 必须同时跑 Windows 和 macOS 安装、命令、MCP、规则、独立 wheel 和研究界面测试。Windows 使用 PowerShell 真正执行，macOS 用 Bash；Windows 专项测试验证带空格路径、退出码与保留不完整环境。Windows 构建便携 EXE ZIP 并验证启动与 JSON 错误协议；macOS 打包工作流负责 DMG。不要把 wheel 或便携 ZIP 称作安装向导。
 
-桌面默认是 `research_ui.py`：一个股票输入框，筛选 Put / 分析走势两个按钮。通过 `QProcess` 运行 `research_cli.py`，后者调用 `research.py` 和共享抓取服务，SDK 在子进程主线程运行。窗口关闭/取消会停止子进程。冻结的 windowed EXE 通过临时 JSON 文件返回结果，不依赖 stdout；不要改为 GUI 线程直接请求 SDK。真实失败保留为空，不填演示报价。
+桌面默认是 `research_ui.py`：保持原有候选表 / 详情 / 走势页签，输入代码查询单股，留空查询默认 Watchlist；候选展开时回车选定，收起时回车搜索 Put，SQLite 来源提示旁的 Watchlist 下拉菜单统一提供「查看 Watchlist」「加入 Watchlist」「管理 Watchlist」「更新股票目录」，不在底部平铺按钮。正常启动自动显示 Watchlist，预览 / 测试不自动抓取。全名单对全部原始合约调用同一 `recommend()` 后取 Top 5/10/20，按相同条件每股保留20再归并，也不另写排序公式。原始合并输入支持离线筛选 / 表头排序，单股仍检查输入只包含该股票。
+
+Watchlist 以同一 SQLite 的 `watchlist` 表为准，schema4新增，成员有唯一 symbol、自增id、加入时间和来源。首次读取时将库旁旧 JSON 或旧 `MOOMOO_WATCHLIST_PATH` 指定文件一次迁入并保留原文件；初始化标记和成员同事务，之后不再读取旧文件。无旧数据的新安装种子在 `watchlist_store.py` 的 DEFAULT_SYMBOLS，删除后不恢复。加入通过研究子进程核验证券资料后事务写入，不抓期权报价；重复不新增。`watchlist_dialog.py` 暂存删除，确认保存才按旧成员ID删除，取消不写库，保留并发新增和历史行情；删空保持空。CLI 省略 JSON 路径默认查库，显式 JSON 是本次只读输入，导入 / 导出使用 db import-watchlist / export-watchlist；不再维护默认 JSON 或文件锁。全名单预检查失败阻止采集，单股失败保留部分结果。
+
+桌面通过 `QProcess` 运行 `research_cli.py`，后者调用共享研究 / 抓取服务，SDK 在子进程主线程运行。窗口关闭/取消会停止工作进程。冻结的 windowed EXE 通过临时 JSON 文件返回结果，不依赖 stdout；不要改为 GUI 线程直接请求 SDK。真实失败保留为空，不填演示报价。
 
 规则、阈值、排序和趋势解释仍只维护 `modules/put-screener/put_rules.py`。`setup.py` 仅在 wheel/sdist 构建时拷贝快照，PyInstaller 同样包含该文件。源码总是优先读取独立文件；修改分发包规则要重新构建。不要手动维护第二套规则。运行研究界面测试：`PYTHONPATH=apps/python QT_QPA_PLATFORM=offscreen apps/python/.venv/bin/python -m unittest discover -s apps/python/tests/integration -p test_research_ui.py -v`。
 
