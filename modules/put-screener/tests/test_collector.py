@@ -1,6 +1,7 @@
 from datetime import datetime
 import importlib.util
 import math
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -8,9 +9,8 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[3]
-spec = importlib.util.spec_from_file_location('put_collector', ROOT / 'scripts/collect-put-data.py')
-collector = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(collector)
+sys.path.insert(0, str(ROOT / 'apps/python'))
+from moopython import market_collection as collector
 
 
 class Rows:

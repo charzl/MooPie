@@ -4,13 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "moomoo-clients"
-version = "0.2.0"
+version = "0.3.0"
 description = "Moomoo desktop market client and option-chain command-line queries"
 requires-python = ">=3.14,<3.15"
 dynamic = ["dependencies"]
 
 [project.scripts]
 moomoo-options = "moopython.options_cli:main"
+moomoo-data = "moopython.market_data_cli:main"
+moomoo-mcp = "moopython.market_mcp:main"
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.3,<3"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

@@ -21,7 +21,7 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
   --budget 25000 --output artifacts/put-screen/budget-ranking.json
 ```
 
-`scripts/collect-put-data.py` 只采集数据，不排序：查询未来三个月全部挂牌 Put，补充 Bid/Ask、Delta、IV、成交量、未平仓量、财报日历和约 550 个自然日内的复权日线。支持 `--months` 和 `--port`。当前筛选器只支持美元计价的标准美股/ETF Put，读取 SDK 报价，不查询账户或执行订单。缺失报价在 `missing_quote_codes` 中列出；财报日历失败在 `calendar_errors` 中列出，不填造数据。
+`scripts/collect-put-data.py` 是 `MarketDataService` 的兼容 CLI 入口（[基础接口和 MCP](../../docs/market-data.md)），只采集数据，不排序：查询未来三个月全部挂牌 Put，补充 Bid/Ask、Delta、IV、成交量、未平仓量、财报日历和约 550 个自然日内的复权日线。支持 `--months` 和 `--port`。当前筛选器只支持美元计价的标准美股/ETF Put，读取 SDK 报价，不查询账户或执行订单。缺失报价在 `missing_quote_codes` 中列出；财报日历失败在 `calendar_errors` 中列出，不填造数据。
 
 把上面的 `input.json` 交给规则文件即可独立重跑，修改规则无需再次联网，也无需重新打包客户端。单独复制引擎文件时，输入字段参考 `example.json`；该示例完全是合成数据。
 

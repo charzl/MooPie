@@ -2,9 +2,9 @@ name: Validate standalone put rules
 on:
   push:
     branches: [main]
-    paths: ['modules/put-screener/**', 'scripts/collect-put-data.py', '.github/workflows/put-screener.yml']
+    paths: ['modules/put-screener/**', 'scripts/collect-put-data.py', 'apps/python/moopython/market_collection.py', '.github/workflows/put-screener.yml']
   pull_request:
-    paths: ['modules/put-screener/**', 'scripts/collect-put-data.py', '.github/workflows/put-screener.yml']
+    paths: ['modules/put-screener/**', 'scripts/collect-put-data.py', 'apps/python/moopython/market_collection.py', '.github/workflows/put-screener.yml']
   workflow_dispatch:
 permissions:
   contents: read

@@ -126,3 +126,5 @@ Publication requires Python unit and integration tests, real OpenD update/startu
 Already published source/version combinations skip the expensive builds. Manual dispatch offers `force` to create another build. The Python installer and validation evidence are uploaded to a draft first; the draft becomes public only when every asset's name and size is verified. Releases persist; Actions artifacts expire after 14 days. GitHub scheduled workflows can run late and must remain enabled on the default branch.
 
 MooPie downloads and verifies OpenD separately on first use, reuses it afterwards and checks for independent updates. CI validates this path without embedding OpenD in the DMG. Installed OpenD's updates and CI's SDK-driven client rebuilds are separate. Download the new client DMG from Releases to replace an installed client.
+
+可复用抓取接口、CLI 和只读 MCP 层见 [行情数据接口](docs/market-data.md)。日线与报价采集复用同一 Python 服务，独立规则文件负责分析；数据库存储和清理策略后续添加。

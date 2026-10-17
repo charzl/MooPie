@@ -90,6 +90,8 @@ jobs:
           python3 -m pip wheel --no-deps apps/python --wheel-dir artifacts/wheels
           python3 -m pip install --no-deps artifacts/wheels/*.whl
           moomoo-options --help
+          moomoo-data --help
+          moomoo-mcp --help
           python3 apps/python/main.py options --help
       - name: OpenD updater tests
         run: swift test --package-path runtime
