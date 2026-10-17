@@ -8,6 +8,7 @@ import unittest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QProcess, QSettings
+from PySide6.QtGui import QFont, QRawFont
 from PySide6.QtWidgets import QApplication
 from moopython.research import load_rules
 from moopython.research_ui import ResearchWindow
@@ -30,6 +31,11 @@ class ResearchUiTests(unittest.TestCase):
     def result(self):
         return dict(action='put', symbol=self.dataset['contracts'][0]['symbol'],
                     collected_at=self.dataset['collected_at'], report=load_rules().scan(self.dataset))
+
+    def test_packaged_font_has_both_chinese_and_latin_glyphs(self):
+        font = QRawFont.fromFont(QFont('Noto Sans SC', 14))
+        self.assertTrue(font.isValid())
+        for character in '股票走势Put123': self.assertTrue(font.supportsCharacter(ord(character)), character)
 
     def test_single_best_put_risks_and_symbol_change_clears_both_results(self):
         result = self.result(); self.window.display(result)

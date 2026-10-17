@@ -27,3 +27,6 @@ dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools.packages.find]
 include = ["moopython*"]
+
+[tool.setuptools.package-data]
+moopython = ["fonts/*"]

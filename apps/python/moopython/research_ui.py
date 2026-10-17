@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QFileDialog, QMessageBox)
 
@@ -13,7 +14,7 @@ from .market_collection import us_symbols
 from .runtime import OpenDRuntime
 
 STYLE = '''
-QWidget {background:#10171e;color:#e8eef2;font-size:14px;font-family:"Arial";}
+QWidget {background:#10171e;color:#e8eef2;font-size:14px;font-family:"Noto Sans SC";}
 QLabel#eyebrow {color:#6fd9bf;font-size:12px;font-weight:bold;}
 QLabel#title {font-size:30px;font-weight:bold;}
 QLabel#muted {color:#9aaab7;font-size:12px;}
@@ -43,6 +44,9 @@ def esc(value):
 class ResearchWindow(QMainWindow):
     def __init__(self, settings=None, port=11111):
         super().__init__()
+        font_path = Path(__file__).with_name('fonts') / 'NotoSansSC.ttf'
+        if QFontDatabase.addApplicationFont(str(font_path)) < 0:
+            raise RuntimeError('Bundled Chinese font is missing or unreadable; reinstall the desktop package.')
         self.setWindowTitle('MooPie · 股票研究')
         self.resize(1120, 790)
         self.setMinimumSize(820, 620)

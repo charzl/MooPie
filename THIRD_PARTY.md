@@ -5,6 +5,7 @@
 - Included OpenSSL 3.0.17 source archive: Apache License 2.0; packaged C++ applications include `THIRD_PARTY_LICENSES/openssl-LICENSE.txt`.
 - moomoo-api 10.11.7108: official Python SDK, installed from PyPI. Retains its upstream terms.
 - PySide6 / Qt: upstream LGPL/GPL/commercial licenses as applicable; packaged with their corresponding distribution metadata and license files by PyInstaller.
+- Noto Sans SC variable font: Copyright 2014–2021 Adobe and Google; SIL Open Font License 1.1. Unmodified font from [Google Fonts](https://github.com/google/fonts/tree/main/ofl/notosanssc), SHA-256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`. Font and license are distributed together in `apps/python/moopython/fonts/` so Chinese and Latin text render without system font installation.
 
 No official OpenD executable, moomoo desktop assets, account information or credentials are included in this repository.
 

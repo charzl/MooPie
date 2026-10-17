@@ -14,6 +14,7 @@ def main():
     subprocess.run([sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
                     '--name', 'MooPie', '--hidden-import', 'moomoo', '--collect-data', 'moomoo',
                     '--collect-data', 'tzdata', '--add-data', f'{ROOT / "modules/put-screener/put_rules.py"}:.',
+                    '--collect-data', 'moopython',
                     '--add-data', f'{ROOT / "fixtures/market.json"}:fixtures', 'main.py'], cwd=app, check=True)
     binary = app/'dist/MooPie/MooPie.exe'
     subprocess.run([str(binary), '--sdk-check'], check=True, timeout=90)
