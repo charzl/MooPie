@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MOOMOO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+MOOMOO_PYTHON="$MOOMOO_ROOT/apps/python/.venv/bin/python"
+case "${1:-help}" in
+  help|-h|--help)
+    cat <<'HELP'
+用法：./moomoo <命令> [参数]
+  doctor    检查环境、OpenD 和一次真实股票报价
+  options   查询期权到期日、行权价和合约代码
+  collect   采集合约、报价、日线和财报，保存为 JSON
+  analyze   用独立规则文件分析已保存的 JSON
+  mcp       启动只读 MCP stdio 服务，供 agent 宿主调用
+  desktop   打开可选桌面界面（先 ./setup.sh --desktop）
+首次安装：./setup.sh
+HELP
+    exit 0 ;;
+  doctor|options|collect|analyze|mcp|desktop) MOOMOO_COMMAND="$1"; shift ;;
+  *) echo "未知命令：$1。运行 ./moomoo --help 查看用法。" >&2; exit 2 ;;
+esac
+if [ ! -x "$MOOMOO_PYTHON" ]; then
+  echo '尚未安装，请先运行 ./setup.sh。' >&2
+  exit 1
+fi
+case "$MOOMOO_COMMAND" in
+  doctor) exec "$MOOMOO_PYTHON" -m moopython.doctor "$@" ;;
+  options) exec "$MOOMOO_PYTHON" -m moopython.options_cli "$@" ;;
+  collect) exec "$MOOMOO_PYTHON" -m moopython.market_data_cli "$@" ;;
+  analyze) exec "$MOOMOO_PYTHON" "$MOOMOO_ROOT/modules/put-screener/put_rules.py" "$@" ;;
+  mcp) exec "$MOOMOO_PYTHON" -m moopython.market_mcp "$@" ;;
+  desktop)
+    if ! "$MOOMOO_PYTHON" -c 'import PySide6' 2>/dev/null; then
+      echo '桌面组件未安装，请运行 ./setup.sh --desktop。' >&2
+      exit 1
+    fi
+    exec "$MOOMOO_PYTHON" "$MOOMOO_ROOT/apps/python/main.py" "$@" ;;
+esac

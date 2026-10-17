@@ -41,12 +41,12 @@ apps/python/.venv/bin/python scripts/collect-put-data.py AVGO NVDA AAPL \
   --output artifacts/put-screen/input.json
 
 # 安装 wheel 或源码后，同样的功能使用正式入口
-python3.14 -m pip install './apps/python[mcp]'
-moomoo-data AVGO NVDA --output artifacts/put-screen/input.json
-moomoo-mcp --port 11111
+./setup.sh
+./moomoo collect AVGO NVDA --output artifacts/put-screen/input.json
+./moomoo mcp --port 11111
 ```
 
-Python wheel 同时提供 `moomoo-options`、`moomoo-data`、`moomoo-mcp`。MCP 使用官方 `mcp>=2.3,<3` SDK，作为可选依赖；普通抓取和独立规则运行不依赖 MCP。现有客户端 wheel 仍包含桌面依赖，但抓取模块运行时不导入 Qt。DMG 继续由现有 CI 构建；MCP 通过 Python 入口启动，无需为修改规则重新构建 DMG。
+Python wheel 同时提供 `moomoo-options`、`moomoo-data`、`moomoo-mcp`。MCP 使用官方 `mcp>=2.3,<3` SDK，作为可选依赖；普通抓取和独立规则运行不依赖 MCP。默认 wheel 安装只要求 SDK，MCP 为可选依赖；桌面 Qt 通过 `[desktop]` 额外安装。DMG 继续由现有 CI 构建；MCP 通过 Python 入口启动，无需为修改规则重新构建 DMG。
 
 MCP host 配置示例（替换成自己的绝对路径）：
 
@@ -54,8 +54,8 @@ MCP host 配置示例（替换成自己的绝对路径）：
 {
   "mcpServers": {
     "moomoo-market-data": {
-      "command": "/ABSOLUTE/PATH/moomoo-clients/apps/python/.venv/bin/python",
-      "args": ["-m", "moopython.market_mcp", "--port", "11111"]
+      "command": "/ABSOLUTE/PATH/moomoo-clients/moomoo",
+      "args": ["mcp"]
     }
   }
 }
