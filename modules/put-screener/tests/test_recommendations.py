@@ -69,18 +69,21 @@ class RecommendationTests(unittest.TestCase):
             with self.subTest(rid=rid):
                 self.assertFalse(rules.recommend(self.dataset, configuration=dict(filters={rid: dict(enabled=True)}))['recommendations'])
 
-    def test_alternatives_cover_distinct_dates_while_best_is_global_first(self):
+    def test_top_ten_is_strict_order_without_forcing_distinct_dates(self):
         second = self.add(35, 85, 1.3)
         later = self.add(60, 80, .5)
         last = self.add(90, 70, .2)
         report = rules.recommend(self.dataset)
         self.assertEqual(report['ranked_codes'][1], second['code'])
-        self.assertEqual([r['code'] for r in report['recommendations']],
-                         [report['ranked_codes'][0], later['code'], last['code']])
+        self.assertEqual([r['code'] for r in report['recommendations']], report['ranked_codes'])
         self.assertEqual(len(report['expiration_comparisons']), 3)
         self.assertEqual(len(rules.recommend(self.dataset, top_n=1)['recommendations']), 1)
         self.dataset['contracts'] = self.dataset['contracts'][:2]
         self.assertEqual(len(rules.recommend(self.dataset)['recommendations']), 2)
+        for index in range(15): self.add(14+index, 80-index, .5+index*.01)
+        report = rules.recommend(self.dataset)
+        self.assertEqual(len(report['recommendations']), 10)
+        self.assertEqual([r['code'] for r in report['recommendations']], report['ranked_codes'][:10])
 
     def test_partial_overrides_validate_against_new_profile_and_stay_immutable(self):
         config = dict(filters={'max-days': dict(threshold=14)})

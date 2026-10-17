@@ -18,6 +18,7 @@ class FilterSortDialog(QDialog):
         self.has_dataset = has_dataset
         self.controls = {}
         self.sort_controls = []
+        self.score_controls = {}
         self.selected_configuration = None
         self.setWindowTitle('Filter 过滤 / Sort 排序')
         self.resize(880, 760)
@@ -70,7 +71,8 @@ class FilterSortDialog(QDialog):
         sorting = QWidget(); sort_layout = QVBoxLayout(sorting)
         explanation = QLabel('依次比较第一、第二、第三排序；相同值才使用下一项。排序不会替你放宽任何 Filter。')
         explanation.setWordWrap(True); sort_layout.addWidget(explanation)
-        preferred = ['daily_gross_return_pct', 'annualized_gross_return_pct', 'gross_return_pct', 'spread_pct_of_mid', 'abs_delta',
+        preferred = ['daily_gross_return_pct', 'risk_score', 'composite_score', 'return_score',
+                     'annualized_gross_return_pct', 'gross_return_pct', 'spread_pct_of_mid', 'abs_delta',
                      'otm_pct', 'breakeven_buffer_pct', 'cash_collateral', 'days_to_expiry',
                      'premium_per_contract_before_costs']
         order = self.initial['sort_order']
@@ -87,6 +89,26 @@ class FilterSortDialog(QDialog):
             row.addWidget(metric, 1); row.addWidget(direction); sort_layout.addLayout(row)
             self.sort_controls.append((metric, direction))
         sort_layout.addStretch(); tabs.addTab(sorting, 'Sort 排序')
+        score_page = QWidget(); score_layout = QVBoxLayout(score_page)
+        note = QLabel('风险分0–100，越高越危险；收益分和综合分越高越好。以下为待验证的研究参数，不代表亏损概率。风险总权重会自动归一化；缺失信息有单独惩罚。改变评分不改变 Filter。')
+        note.setWordWrap(True); score_layout.addWidget(note)
+        restore = QPushButton('恢复示例评分参数'); restore.clicked.connect(self.restore_scoring)
+        score_layout.addWidget(restore)
+        for group in ('weights', 'parameters'):
+            title = QLabel('风险维度权重（至少一项大于0）' if group == 'weights' else '评分尺度和收益 / 风险取舍')
+            title.setStyleSheet('font-weight:bold;padding-top:12px;'); score_layout.addWidget(title)
+            for key, value in self.initial['scoring'][group].items():
+                if group == 'weights': low, high, label = 0, 100, self.engine.RISK_LABELS[key]
+                else: _, low, high, label = self.engine.SCORING_PARAMETERS[key]
+                row = QHBoxLayout(); text = QLabel(label); text.setWordWrap(True); row.addWidget(text, 1)
+                field = QDoubleSpinBox(); field.setDecimals(6 if group == 'parameters' else 2)
+                field.setRange(low, high); field.setValue(value)
+                if key in ('return_weight', 'delta_high', 'daily_return_target_pct'): field.setSingleStep(.05)
+                row.addWidget(field); score_layout.addLayout(row)
+                self.score_controls[(group, key)] = field
+        score_layout.addStretch()
+        score_scroll = QScrollArea(); score_scroll.setWidgetResizable(True); score_scroll.setWidget(score_page)
+        tabs.addTab(score_scroll, '收益 / 风险评分')
         if report:
             text = f'本次数据：{report["qualified_count"]} / {report["total_contracts"]} 个合约符合已启用 Filter。'
             if report['qualified_count'] == 0:
@@ -112,7 +134,12 @@ class FilterSortDialog(QDialog):
             if field: result[group][rid]['threshold'] = field.value()
         result['sort_order'] = [[metric.currentData(), direction.currentData()]
                                 for metric, direction in self.sort_controls if metric.currentData() is not None]
+        for (group, key), field in self.score_controls.items(): result['scoring'][group][key] = field.value()
         return self.engine.resolve_configuration(result)
+
+    def restore_scoring(self):
+        defaults = self.engine.default_configuration()['scoring']
+        for (group, key), field in self.score_controls.items(): field.setValue(defaults[group][key])
 
     def apply(self):
         try: self.selected_configuration = self.configuration()
@@ -120,5 +147,6 @@ class FilterSortDialog(QDialog):
             message = str(error)
             if message.startswith('Invalid, duplicate'): message = '排序项不能重复，请把重复的后续项改为“不使用”。'
             elif message.startswith('Minimum filter exceeds'): message = '最小值不能大于最大值，请检查到期天数或 Delta 范围。'
+            elif message.startswith('At least one risk'): message = '至少一项风险维度的权重需要大于0。'
             QMessageBox.warning(self, '设置无效', message); return
         self.accept()

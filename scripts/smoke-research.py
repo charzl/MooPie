@@ -1,5 +1,6 @@
 """Exercise explicit filters and offline reuse through a frozen desktop binary."""
 import json
+import copy
 from pathlib import Path
 import subprocess
 import sys
@@ -27,4 +28,21 @@ with tempfile.TemporaryDirectory(prefix='moomoo frozen research ') as directory:
     assert result['report']['ranked'][0]['warnings']
     assert result['report']['sort_order'] == [['cash_collateral', 'asc']]
     assert result['input_dataset'] == dataset and result['collected_at'] == dataset['collected_at']
-print('Frozen filters, sorting and offline data reuse passed.')
+    for index in range(1, 14):
+        row = copy.deepcopy(dataset['contracts'][0])
+        row.update(code=f'US.TEST-SYNTHETIC-{index}', strike=90-index*.5, snapshot_strike=90-index*.5,
+                   bid=1.5+index*.01, ask=1.6+index*.01, delta=-.2+index*.005)
+        dataset['contracts'].append(row)
+    source.write_text(json.dumps(dataset), encoding='utf-8')
+    config.write_text(json.dumps(dict(sort_order=[['composite_score', 'desc']],
+        scoring=dict(parameters=dict(return_weight=.3, stress_drop_pct=30)))), encoding='utf-8')
+    subprocess.run(command, check=True, timeout=60)
+    result = json.loads(output.read_text(encoding='utf-8'))
+    report = result['report']
+    assert len(report['recommendations']) == 10
+    assert [r['code'] for r in report['recommendations']] == report['ranked_codes'][:10]
+    assert report['configuration']['scoring']['parameters']['return_weight'] == .3
+    assert len(report['best_recommendation']['scoring']['components']) == 5
+    assert report['best_recommendation']['scoring']['missing_components'] == ['earnings']
+    assert all(0 <= r['risk_score'] <= 100 for r in report['recommendations'])
+print('Frozen filters, Top 10 scoring, sorting and offline data reuse passed.')

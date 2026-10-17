@@ -15,7 +15,7 @@ command -v uv
 ./moomoo --help
 ```
 
-保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前推荐功能分支为 `codex/put-recommendations`。不要为安装强制清空工作区或覆盖其他配置。
+保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前Top 10评分功能分支为 `codex/top-ten-risk-ranking`。不要为安装强制清空工作区或覆盖其他配置。
 
 项目要求 Python `>=3.14,<3.15`。默认安装 CLI/MCP，桌面是可选功能。不修改系统 Python，不要求用户手动激活虚拟环境。以 `apps/python/pyproject.toml` 和 `requirements.txt` 为依赖依据，更新版本时同步检查构建依赖。
 
@@ -128,7 +128,9 @@ tool_timeout_sec = 120
 
 趋势分析报告数据日期/时区、考察期限、指标值、关键价位和改判条件；只使用已完成日线，不把规则命中数当成经过校准的涨跌概率。Put 结果查看 `ranked`、财报未验证观察名单、`failed_rules`、预算及快照时间。空结果保留，不为产生候选自动放宽规则；未知财报不推断成无财报。
 
-Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(dataset, budget=None, configuration=None, top_n=3)`。先按基础风险边界过滤，再按权利金/全额担保本金/剩余自然日排序，所有符合边界者均排序，无额外软分数门槛。首选和优先覆盖不同到期日的备选由引擎返回，不由 UI 拼装策略。查看 `best_recommendation` / `recommendations` 的日期、行权价、日均毛收益率、理由、取舍、风险和到期损益情景；这是假设完整保留权利金的比较值，不是每日实际利润。
+Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(dataset, budget=None, configuration=None, top_n=10)`。先按硬边界过滤，再按所选收益、低风险、综合或自定义排序，严格返回 `ranked[:top_n]`，不按不同到期日替换更高排名者。无额外软分数门槛，不足10份就返回实际数量。`ranking_views` 提供三种预设的Top代码。日期/行权价、收益/风险/综合分、理由及下跌情景均由引擎返回，UI只展示。
+
+评分只在 `put_rules.py` 的 `RISK_WEIGHTS` / `SCORING_PARAMETERS` 及函数中维护，初版Delta/情景亏损/趋势/流动性/财报权重25/25/20/15/15，参考情景下跌20%。风险分含缺失信息惩罚（默认100），不是亏损概率。收益分用固定日均参考目标0.1%映射0–100，综合分为 `return_weight×收益分+(1−return_weight)×(100−风险分)`，初始0.5。全部都是可调、尚未校准的原型参数，不能称为统计意义的预期收益或个人适合度。修改评分不改变 Filter、不改变数据时间；关闭某个 Filter 不取消该项风险分。趋势评分使用默认参考条件，防止关闭检查美化分数。详见 [docs/put-scoring.md](docs/put-scoring.md)。
 
 `RECOMMENDATION_BOUNDARIES` 为未校准的示例预设：7–90天、价外幅度≥0、绝对Delta≤0.30、Bid≥0.10、买盘数量≥1、价差≤15%、同交易日报价，及标准合约/未停牌。个人风险范围未确认，不将示例阈值当成用户认可；预算未提供必须标记。趋势/财报/最低Delta/成交量/未平仓量默认不拦截，可通过 `--config` 显式启用为硬限制。基础有效性检查始终执行；任何已启用边界不可因高收益或结果为空而自动越过。`scan()` / `--scan-only` 保留原全条件扫描，调用时说明两者默认配置不同。`filter_impact` / `relaxation_preview` 只模拟数量。
 

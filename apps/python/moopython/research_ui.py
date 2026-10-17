@@ -9,11 +9,11 @@ from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, Qt
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QFileDialog, QMessageBox,
-    QDialog, QDialogButtonBox)
+    QDialog, QDialogButtonBox, QComboBox)
 
 from .market_collection import us_symbols
 from .runtime import OpenDRuntime
-from .research_explanation import explanation_html, sort_description, ranking_html, recommendations_html
+from .research_explanation import explanation_html, sort_description, recommendations_html, score_breakdown_html
 from .research import load_rules
 from .research_controls import FilterSortDialog
 
@@ -89,6 +89,12 @@ class ResearchWindow(QMainWindow):
         settings_row = QHBoxLayout()
         hint = QLabel('美股 · 未来三个月期权 · 现金担保 Put'); hint.setObjectName('muted')
         settings_row.addWidget(hint); settings_row.addStretch()
+        self.ranking_mode = QComboBox()
+        for label, key in [('收益优先', 'return'), ('低风险优先', 'risk'), ('收益 / 风险综合', 'balanced'), ('自定义排序', 'custom')]:
+            self.ranking_mode.addItem(label, key)
+        self.sync_ranking_mode()
+        self.ranking_mode.currentIndexChanged.connect(self.change_ranking_mode)
+        settings_row.addWidget(self.ranking_mode)
         self.rules_button = QPushButton('Filter / Sort 设置')
         self.rules_button.clicked.connect(self.show_rules)
         settings_row.addWidget(self.rules_button)
@@ -117,12 +123,12 @@ class ResearchWindow(QMainWindow):
     def reset_panels(self):
         self.results.clear()
         self.put_dataset = None
-        self.put_result.setHtml('<h2>卖出 Put</h2><p>先按已启用的 Filter 过滤，再按独立 Sort 设置排序。</p><p style="color:#9aaab7">可以选择过滤条件和阈值；没有候选时，查看原因后自行调整。</p>')
+        self.put_result.setHtml('<h2>卖出 Put · Top 10</h2><p>先按 Filter 过滤，再按收益、低风险或综合得分排序。</p><p style="color:#9aaab7">评分参数可在设置中调整；没有候选时，查看原因后自行调整 Filter。</p>')
         self.trend_result.setHtml('<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>')
         if hasattr(self, 'export_button'): self.export_button.setEnabled(False)
 
     def busy(self, value):
-        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.rules_button): control.setEnabled(not value)
+        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.rules_button, self.ranking_mode): control.setEnabled(not value)
         self.cancel_button.setVisible(value)
 
     def start(self, action, reuse=False):
@@ -226,10 +232,11 @@ class ResearchWindow(QMainWindow):
             report = result['report']; ranked = report['ranked']
             self.put_dataset = result.get('input_dataset')
             self.configuration = report.get('configuration', self.configuration)
+            self.sync_ranking_mode()
             content = f'<p>检查 {report["total_contracts"]} 个合约，{report["qualified_count"]} 个通过当前 Filter。</p>'
-            content += '<p>基础边界预设为研究示例，请按个人承受范围调整。趋势偏弱及财报未知默认保留风险提示；可在设置中升级为硬限制。</p>'
             content += '<p>Sort：' + esc(sort_description(report['sort_order'])) + '</p>'
             if ranked:
+                content += recommendations_html(report)
                 best = ranked[0]; m = best['metrics']
                 content += f'<h3>{esc(best["code"])}</h3><p>到期 {esc(best["expiration"])} · {m["days_to_expiry"]} 天</p>'
                 fields = [('行权价', f'${m["strike"]:,.2f}'), ('参考 Bid / Ask', f'${m["bid"]:.2f} / ${m["ask"]:.2f}'),
@@ -242,11 +249,11 @@ class ResearchWindow(QMainWindow):
                           ('买卖价差 / 未平仓量', f'{m["spread_pct_of_mid"]:.2f}% / {m["open_interest"]:,.0f}'),
                           ('最大亏损（股价归零）', f'${m["max_loss_before_costs"]:,.2f}')]
                 content += ''.join(f'<p>{label}：<b>{value}</b></p>' for label, value in fields)
-                content += recommendations_html(report)
+                content += score_breakdown_html(report['best_recommendation'])
                 for warning in best.get('warnings', []): content += '<p><b>需复核：' + esc(warning) + '</b></p>'
                 content += f'<p>合约快照：{esc(best["snapshot_update_time"])} · 纽约时间</p>'
                 if not best['live_review_ready']: content += '<p><b>仅供研究；交易前需核对上述风险并刷新报价。</b></p>'
-                content += ranking_html(report)
+                content += '<p>基础边界预设为研究示例，请按个人承受范围调整。趋势偏弱及财报未知默认保留风险提示；可在设置中升级为硬限制。</p>'
             else:
                 content += '<h3>没有符合当前 Filter 的 Put</h3><p>可打开 Filter / Sort 设置，自行关闭条件或调整阈值；程序不会自动放宽。</p>'
                 unknown = len(report['earnings_unverified_watchlist'])
@@ -264,7 +271,27 @@ class ResearchWindow(QMainWindow):
         report = self.results.get('put', {}).get('report')
         dialog = FilterSortDialog(self.configuration, report, self.put_dataset is not None, self)
         if dialog.exec() != QDialog.DialogCode.Accepted: return
-        self.configuration = dialog.selected_configuration
+        self.apply_configuration(dialog.selected_configuration)
+
+    def sync_ranking_mode(self):
+        primary, direction = self.configuration['sort_order'][0]
+        key = {('daily_gross_return_pct', 'desc'): 'return', ('risk_score', 'asc'): 'risk',
+               ('composite_score', 'desc'): 'balanced'}.get((primary, direction), 'custom')
+        self.ranking_mode.blockSignals(True)
+        self.ranking_mode.setCurrentIndex(self.ranking_mode.findData(key))
+        self.ranking_mode.blockSignals(False)
+
+    def change_ranking_mode(self, _index):
+        key = self.ranking_mode.currentData()
+        if key == 'custom':
+            self.show_rules(); self.sync_ranking_mode(); return
+        config = load_rules().recommendation_configuration(self.configuration)
+        config['sort_order'] = [list(item) for item in load_rules().RANKING_SORT_ORDERS[key]]
+        self.apply_configuration(config)
+
+    def apply_configuration(self, configuration):
+        self.configuration = configuration
+        self.sync_ranking_mode()
         self.settings.setValue('put_recommendation_configuration_v1', json.dumps(self.configuration))
         if self.put_dataset is not None: self.start('put', reuse=True)
         else:

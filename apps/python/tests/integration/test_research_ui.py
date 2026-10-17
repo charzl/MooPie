@@ -103,6 +103,38 @@ class ResearchUiTests(unittest.TestCase):
         self.assertFalse(saved['filters']['earnings-checked']['enabled'])
         self.assertEqual(saved['sort_order'][0], ['cash_collateral', 'asc'])
 
+    def test_ranking_modes_reuse_data_and_keep_filter_membership(self):
+        self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code='US.TEST-SECOND',
+                                             bid=1.6, ask=1.7, delta=-.29))
+        result = self.result(); result['input_dataset'] = self.dataset
+        self.window.display(result)
+        members = set(result['report']['ranked_codes'])
+        self.window.ranking_mode.setCurrentIndex(self.window.ranking_mode.findData('risk'))
+        deadline = time.monotonic()+15
+        while self.window.process is not None and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.01)
+        self.assertIsNone(self.window.process)
+        report = self.window.results['put']['report']
+        self.assertEqual(set(report['ranked_codes']), members)
+        self.assertEqual(report['collected_at'], self.dataset['collected_at'])
+        self.assertEqual(report['sort_order'][0], ['risk_score', 'asc'])
+        self.assertIn('风险分↓', self.window.put_result.toPlainText())
+        self.assertIn('Top 10', self.window.put_result.toPlainText())
+
+    def test_score_editor_changes_scoring_without_touching_filters_or_sort(self):
+        dialog = FilterSortDialog(self.window.configuration, parent=self.window)
+        try:
+            before = dialog.configuration()
+            dialog.score_controls[('parameters', 'return_weight')].setValue(.3)
+            changed = dialog.configuration()
+            self.assertEqual(changed['filters'], before['filters'])
+            self.assertEqual(changed['sort_order'], before['sort_order'])
+            self.assertEqual(changed['scoring']['parameters']['return_weight'], .3)
+            dialog.restore_scoring()
+            self.assertEqual(dialog.configuration()['scoring'], before['scoring'])
+        finally: dialog.close()
+
     def test_single_best_put_risks_and_symbol_change_clears_both_results(self):
         result = self.result(); self.window.display(result)
         text = self.window.put_result.toPlainText()

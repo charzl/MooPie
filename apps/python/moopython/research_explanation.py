@@ -14,6 +14,7 @@ METRICS = {
     'macd_histogram_change': 'MACD 柱较前日变化', 'cash_collateral': '现金担保（美元）',
     'annualized_gross_return_pct': '现金担保权利金简单年化',
     'daily_gross_return_pct': '日均权利金毛收益率',
+    'return_score': '收益分', 'risk_score': '风险分（越低越好）', 'composite_score': '综合分',
     'gross_return_pct': '权利金 / 担保本金',
     'premium_per_contract_before_costs': '每张权利金（费用前）',
 }
@@ -43,7 +44,7 @@ def condition_text(rule):
 
 def table(headers, rows):
     head = ''.join(f'<th align="left">{escape(str(h))}</th>' for h in headers)
-    body = ''.join('<tr>' + ''.join(f'<td>{escape(str(v))}</td>' for v in row) + '</tr>' for row in rows)
+    body = ''.join('<tr>' + ''.join('<td>' + escape(str(v)).replace('\n', '<br>') + '</td>' for v in row) + '</tr>' for row in rows)
     return f'<table width="100%" cellpadding="5" cellspacing="0"><tr>{head}</tr>{body}</table>'
 
 
@@ -72,16 +73,28 @@ def ranking_html(report):
 def recommendations_html(report):
     choices = report.get('recommendations', [])
     if not choices: return ''
-    content = '<h3>规则引擎的到期日 / 行权价比较</h3><p>首选是总体第一名；备选优先覆盖不同到期日，因此不一定是总体第二、三名。</p>'
-    content += table(['选择', '到期 / 行权价', '日均毛收益率', '每张权利金 / 担保本金', '总体排名'],
-        [['首选' if c['recommendation_rank'] == 1 else '备选', f"{c['expiration']} / ${c['strike']:,.2f}",
-          f"{c['daily_gross_return_pct']:.4f}%", f"${c['premium_per_contract_before_costs']:,.2f} / ${c['cash_collateral']:,.2f}",
-          c['overall_rank']] for c in choices])
-    for choice in choices:
-        content += '<p><b>' + escape(choice['code']) + '</b></p><ul>'
-        content += ''.join('<li>' + escape(reason) + '</li>' for reason in choice['reasons'] + choice['tradeoffs']) + '</ul>'
-        if choice['risk_notes']: content += '<p>需复核：' + escape('；'.join(choice['risk_notes'])) + '</p>'
+    content = f'<h3>Top {report.get("top_n_requested", 10)} · 规则引擎的到期日 / 行权价比较</h3>'
+    if len(choices) < report.get('top_n_requested', 10): content += f'<p>风险边界内只有 {len(choices)} 份合约，返回实际数量。</p>'
+    content += table(['排名', '到期 / 行权价', '日均毛收益率', '收益分', '风险分↓', '综合分↑'],
+        [[c['overall_rank'], f"{c['expiration']}\n${c['strike']:,.2f}",
+          f"{c['daily_gross_return_pct']:.4f}%", f"{c['return_score']:.2f}",
+          f"{c['risk_score']:.2f}", f"{c['composite_score']:.2f}"] for c in choices])
+    p = report['configuration']['scoring']['parameters']
+    content += f'<p>收益分 = min(100, 日均毛收益率 / {p["daily_return_target_pct"]:g}% ×100)。综合分 = {100*p["return_weight"]:g}% ×收益分 + {100*(1-p["return_weight"]):g}% ×(100−风险分)。评分参数为研究示例，未回测校准。</p>'
     content += '<p>日均毛收益率 = 权利金 ÷ 担保本金 ÷ 剩余自然日 × 100%。假设完整保留权利金；不是实际每天到账的收益，股价下跌可产生亏损。</p>'
+    return content
+
+
+def score_breakdown_html(choice):
+    scoring = choice['scoring']
+    content = '<h3>首选的评分依据</h3>'
+    content += table(['风险维度', '分数', '权重', '贡献分'],
+        [[c['label'] + ('（信息缺失）' if not c['known'] else ''), f"{c['score']:.2f}",
+          f"{c['weight_pct']:.1f}%", f"{c['contribution']:.2f}"] for c in scoring['components']])
+    content += '<ul>' + ''.join('<li>' + escape(c['explanation']) + '</li>' for c in scoring['components']) + '</ul>'
+    content += f'<p>有数据支持的风险权重覆盖率 {scoring["evidence_coverage_pct"]:.1f}%；未知项按设置计惩罚分。风险分是相对研究指标，不是亏损概率；部分维度相关，不代表独立风险。</p>'
+    content += '<h3>选择理由与取舍</h3><ul>' + ''.join('<li>' + escape(r) + '</li>' for r in choice['reasons']+choice['tradeoffs']) + '</ul>'
+    if choice['risk_notes']: content += '<p>需复核：' + escape('；'.join(choice['risk_notes'])) + '</p>'
     return content
 
 

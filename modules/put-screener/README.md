@@ -4,15 +4,16 @@
 
 Filter 决定保留哪些合约，Sort 独立决定保留者的顺序。`TREND_RULES`、`RULES`、`SORT_ORDER` 是可编辑的默认值；每次运行可通过 JSON `configuration` 覆盖开关、阈值和排序，不改变默认值。已启用的 Filter 必须全部通过；关闭的条件不再排除，但相关风险仍保留。标准100股/未停牌和计算所需基础数据检查始终执行。报告记录实际配置、指纹和输入数据指纹，便于复现。
 
-新增指标或修改默认规则时仍只编辑同一 `put_rules.py`，提高 `RULESET_VERSION`。日常入口是 `recommend(dataset, budget=None, configuration=None, top_n=3)`，CLI 和桌面均使用它。基础边界由同一文件的 `RECOMMENDATION_BOUNDARIES` 定义；`recommendation_configuration()` 返回该配置。旧的 `scan()` / CLI `--scan-only` 保留原全部条件启用的默认配置，用于单独审查和兼容。
+新增指标或修改默认规则时仍只编辑同一 `put_rules.py`，提高 `RULESET_VERSION`。日常入口是 `recommend(dataset, budget=None, configuration=None, top_n=10)`，CLI 和桌面均使用它。基础边界由同一文件的 `RECOMMENDATION_BOUNDARIES` 定义；`recommendation_configuration()` 返回该配置。旧的 `scan()` / CLI `--scan-only` 保留原全部条件启用的默认配置，用于单独审查和兼容。
 
 规则引擎直接返回：
 
 - `decision` / `decision_summary`：边界内是否有候选；没有时保留空结果。
 - `best_recommendation`：总体排序第一名的日期、行权价、权利金、担保本金、日均毛收益率及盈亏平衡。
-- `recommendations`：默认最多三项，首选之后优先覆盖不同到期日，再补充其他高排名合约。`overall_rank` 与完整 `ranked` 对应，备选不一定是总体第二名。
+- `recommendations`：严格返回当前排序前10项（可设 `top_n`），不足10项返回实际数量。`overall_rank` 与完整 `ranked` 一致，不为分散到期日跳过更高名次。
 - 每个推荐的 `reasons`、`tradeoffs`、`risk_notes`、`scenarios`：选择依据、Delta/价差/最大亏损、未知信息及到期时股价不变或下跌10/20/30/100%的损益（费用前）。UI 直接展示这些结果。
 - `expiration_comparisons`：每个到期日的最优合约；`comparison_basis`：公式、实际排序和选择策略；实际配置与原始指纹仍保留。
+- `return_score` / `risk_score` / `composite_score`：收益分、风险分和综合分；`scoring.components` 有每项风险权重、贡献、证据和未知状态，`ranking_views` 提供三种排序的Top代码。评分初版为可修改的研究假设，不是概率或预期损失模型。[完整公式与配置](../../docs/put-scoring.md)。
 
 默认排名为 **日均权利金毛收益率 = 每张 Bid 权利金 ÷ 全额现金担保本金 ÷ 剩余自然日 × 100%**。假设完整保留权利金，不是每天实际盈利，也不是扣除风险后的预期回报。例：$200 / $10,000 / 30 ×100%=0.0667%/天。硬边界限定允许承担的风险后，才比较该指标；没有额外软分数门槛。
 
@@ -37,7 +38,7 @@ python3.14 modules/put-screener/put_rules.py artifacts/put-screen/input.json \
 
 把上面的 `input.json` 交给规则文件即可独立重跑，修改规则无需再次联网，也无需重新打包客户端。单独复制引擎文件时，输入字段参考 `example.json`；该示例完全是合成数据。
 
-例如用户明确选择放宽最小未平仓量、关闭趋势过滤并改为低 Delta 优先时，将下面保存为 `filters.json`（演示配置，不是策略建议）：
+例如用户明确选择启用最小未平仓量、关闭趋势过滤并改为低 Delta 优先时，将下面保存为 `filters.json`（演示配置，不是策略建议）：
 
 ```json
 {

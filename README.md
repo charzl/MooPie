@@ -8,10 +8,10 @@
 
 需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。macOS 缺少 uv 时运行 `brew install uv`；Windows 用 `winget install --id=astral-sh.uv -e`，安装后重开终端。脚本会准备 Python **3.14**，无需自己激活虚拟环境。
 
-当前按日均收益比较 Put 的功能位于 `codex/put-recommendations` 分支，首次下载对应版本：
+当前 Put Top 10 与收益 / 风险评分功能位于 `codex/top-ten-risk-ranking` 分支，首次下载对应版本：
 
 ```sh
-git clone --branch codex/put-recommendations https://github.com/charzl/moomoo-clients.git
+git clone --branch codex/top-ten-risk-ranking https://github.com/charzl/moomoo-clients.git
 cd moomoo-clients
 ./setup.sh
 ```
@@ -73,7 +73,9 @@ mkdir -p artifacts/options
   --csv-output artifacts/put-screen/ranking.csv
 ```
 
-抓取联网，分析离线。规则引擎先执行硬边界，再按 **权利金 ÷ 全额担保本金 ÷ 剩余自然日** 比较所有留下的合约。`best_recommendation` 返回首选，`recommendations` 默认最多三项，优先覆盖不同到期日，包含行权价、日均毛收益率、选择理由、风险及下跌情景损益。`ranked` 保留完整排序；`underlyings` 有趋势证据，`failed_rules` 说明排除原因。趋势偏弱及财报未知默认提示风险，可自行设为硬边界。
+抓取联网，分析离线。规则引擎先执行硬边界，再比较留下的合约，默认收益指标为 **权利金 ÷ 全额担保本金 ÷ 剩余自然日**。`recommendations` 严格返回当前排序的前10项，不足10项就返回实际数量，不强制分散到期日；`best_recommendation` 是第一名。每项包含行权价、日均毛收益率、收益分、风险分、综合分及评分拆解。`ranked` 保留完整排序；趋势及排除证据仍保留。
+
+可用 `--rank-by return`（收益高优先）、`--rank-by risk`（风险低优先）、`--rank-by balanced`（综合分高优先），与 `--config`、`--top` 组合使用。初版风险包含 Delta、下跌情景亏损、趋势、流动性、财报五项；综合分初始为 `50%×收益分 + 50%×(100−风险分)`。权重、收益评分尺度和下跌情景可调，均为未校准研究参数，风险分不是亏损概率。完整公式、示例和局限见[评分说明](docs/put-scoring.md)。
 
 日均毛收益率是完整保留权利金时的比较值，不是每天实际到账或保证盈利。例如每张权利金 $200、担保本金 $10,000、剩余30天，日均为 `200 / 10000 / 30 × 100% = 0.0667%`。本金按 `行权价 × 100股`，使用 Bid 估算权利金，尚未扣除费用。
 
@@ -149,7 +151,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
 
 输入股票代码，选择一个功能：
 
-- **筛选卖出 Put**：抓取未来三个月合约、报价、日线和财报。展示规则引擎选出的首选与备选到期日/行权价、日均毛收益率、权利金、担保现金、盈亏平衡、最大亏损及选择理由，并保留前10名完整排序。
+- **筛选卖出 Put**：抓取未来三个月合约、报价、日线和财报，展示Top 10的日期/行权价、日均毛收益率、收益分、风险分、综合分，以及首选的评分贡献、权利金、担保现金、盈亏平衡和最大亏损。主界面可切换收益、低风险、综合排序。
 - **分析走势**：用已完成日线计算 MA20/50/200、RSI、MACD 和成交量，展示未来 5–20 个交易日的条件判断、关键价位及改判依据。它不是盘中预测或涨跌概率模型。
 
 两个结果均标注股票、数据时间，可导出完整 JSON。查询在独立进程运行，可以取消；输入另一只股票会清空旧结果。默认连接本机 OpenD，界面可改端口。无需配置 MCP 或外部 AI API Key。
@@ -158,6 +160,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
 
 - **Filter 页面**：勾选条件、调整不可越过的边界。基础预设为7–90天、行权价不高于现价、绝对 Delta ≤0.30、Bid ≥$0.10、买盘数量 ≥1、价差 ≤15%，且报价属于采集交易日。这些数值仅作研究示例，未代表你的个人承受范围。趋势、最低 Delta、成交量、未平仓量和财报默认仅供参考；可勾选升级为硬限制。标准100股、未停牌和必要数据检查始终执行。
 - **Sort 页面**：独立选择最多三项排序指标及升降序。默认日均毛收益率从高到低，再比较价差与绝对 Delta。简单年化为日均值乘365，排序等价；改变 Sort 不改变候选名单。
+- **收益 / 风险评分页面**：调整五项风险权重、下跌情景、未知信息惩罚、收益分参考目标，以及综合分中的收益权重。风险分0–100，越低越好；收益分、综合分越高越好。默认权重和尺度只是原型参数；修改评分不会改变硬边界。
 - **没有结果**：面板显示实际指标、阈值、排除数量，以及关闭单项或趋势/财报组合后的候选数量预览。预览不自动应用条件；各项排除数量可能重叠。
 - **调整后重跑**：已有数据时，点击“应用并重新筛选（已有数据）”离线重算，不重新请求 OpenD；结果保留原始采集时间。点击主界面“筛选卖出 Put”才刷新行情。更换股票或端口会清空缓存。设置会保留到下次打开。
 

@@ -1,6 +1,7 @@
 """Editable, standalone cash-secured PUT research rules. Python standard library only.
 
-Edit RECOMMENDATION_BOUNDARIES / TREND_RULES / RULES / SORT_ORDER below,
+Edit RECOMMENDATION_BOUNDARIES / RISK_WEIGHTS / SCORING_PARAMETERS /
+TREND_RULES / RULES / SORT_ORDER below,
 increase RULESET_VERSION, and rerun.
 No broker, Qt, other rule-engine package, model, or order API is imported here.
 """
@@ -15,8 +16,8 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.4.0'
-RULESET_VERSION = '3.0.0'
+ENGINE_VERSION = '0.5.0'
+RULESET_VERSION = '4.0.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # These remain available as optional hard filters. Oversold is not a buy signal.
 TREND_RULES = [
@@ -47,11 +48,34 @@ RULES = [
 # Among survivors, maximize daily gross premium on full strike cash collateral;
 # ties favor tighter spreads / lower delta.
 SORT_ORDER = [('daily_gross_return_pct', 'desc'), ('spread_pct_of_mid', 'asc'), ('abs_delta', 'asc')]
+RANKING_SORT_ORDERS = {
+    'return': [('daily_gross_return_pct', 'desc'), ('risk_score', 'asc'), ('spread_pct_of_mid', 'asc')],
+    'risk': [('risk_score', 'asc'), ('daily_gross_return_pct', 'desc'), ('spread_pct_of_mid', 'asc')],
+    'balanced': [('composite_score', 'desc'), ('daily_gross_return_pct', 'desc'), ('risk_score', 'asc')],
+}
+# Provisional research model. Weights and scales have NOT been calibrated.
+RISK_WEIGHTS = dict(delta=25, stress_loss=25, trend=20, liquidity=15, earnings=15)
+RISK_LABELS = dict(delta='Delta 敏感度', stress_loss='下跌情景亏损', trend='股票趋势',
+                   liquidity='流动性', earnings='财报事件')
+# Default, lower bound, upper bound, editable parameter label.
+SCORING_PARAMETERS = {
+    'delta_high': (.5, .000001, 1, 'Delta 达到满风险分的参考值'),
+    'stress_drop_pct': (20, .000001, 100, '到期股价下跌情景（%）'),
+    'stress_loss_high_pct': (20, .000001, 100, '情景亏损占本金达到满分的参考值（%）'),
+    'spread_high_pct': (15, .000001, 200, '价差达到满风险分的参考值（%）'),
+    'open_interest_target': (200, .000001, 1e9, '未平仓量参考目标'),
+    'bid_size_target': (10, .000001, 1e9, '买盘数量参考目标'),
+    'earnings_buffer_days': (3, .000001, 365, '到期与财报的间隔参考天数'),
+    'unknown_risk_score': (100, 0, 100, '缺失趋势 / 财报的风险惩罚分'),
+    'daily_return_target_pct': (.1, .000001, 100, '收益分达到100分的日均毛收益率（%）'),
+    'return_weight': (.5, 0, 1, '综合分中收益的权重（0–1，其余为风险权重）'),
+}
 LIVE_MAX_SNAPSHOT_AGE_SECONDS = 900
 OPS = {'>': operator.gt, '>=': operator.ge, '<': operator.lt,
        '<=': operator.le, '==': operator.eq}
 NY = ZoneInfo('America/New_York')
 METRICS = frozenset(('bid', 'ask', 'shares', 'strike', 'underlying_price', 'days_to_expiry',
+    'risk_score', 'return_score', 'composite_score', 'stress_loss_pct',
     'abs_delta', 'iv_pct', 'volume', 'open_interest', 'bid_size', 'spread_pct_of_mid', 'otm_pct',
     'breakeven_before_costs', 'breakeven_buffer_pct', 'premium_per_contract_before_costs',
     'cash_collateral', 'gross_return_pct', 'daily_gross_return_pct', 'annualized_gross_return_pct', 'max_profit_before_costs',
@@ -97,7 +121,8 @@ def default_configuration():
     return dict(schema=1,
         filters={rid: dict(enabled=True, threshold=float(threshold)) for rid, _, _, threshold in RULES},
         trend_filters={rid: dict(enabled=True, threshold=float(threshold)) for rid, _, _, threshold in TREND_RULES},
-        sort_order=[list(item) for item in SORT_ORDER])
+        sort_order=[list(item) for item in SORT_ORDER],
+        scoring=dict(weights=dict(RISK_WEIGHTS), parameters={key: value[0] for key, value in SCORING_PARAMETERS.items()}))
 
 
 def resolve_configuration(configuration=None):
@@ -105,10 +130,24 @@ def resolve_configuration(configuration=None):
     validate_rules()
     result = default_configuration()
     if configuration is None: return result
-    if not isinstance(configuration, dict) or set(configuration) - {'schema', 'filters', 'trend_filters', 'sort_order'}:
+    if not isinstance(configuration, dict) or set(configuration) - {'schema', 'filters', 'trend_filters', 'sort_order', 'scoring'}:
         raise ValueError('Invalid filter configuration keys')
     if type(configuration.get('schema', 1)) is not int or configuration.get('schema', 1) != 1:
         raise ValueError('Unsupported filter configuration schema')
+    scoring = configuration.get('scoring', {})
+    if not isinstance(scoring, dict) or set(scoring) - {'weights', 'parameters'}:
+        raise ValueError('Invalid scoring configuration keys')
+    for group in ('weights', 'parameters'):
+        overrides = scoring.get(group, {})
+        if not isinstance(overrides, dict) or set(overrides) - result['scoring'][group].keys():
+            raise ValueError('Unknown scoring ' + group)
+        for key, value in overrides.items():
+            number = finite(value, 'Scoring ' + key)
+            low, high = (0, 100) if group == 'weights' else SCORING_PARAMETERS[key][1:3]
+            if not low <= number <= high: raise ValueError('Scoring parameter out of range: ' + key)
+            result['scoring'][group][key] = number
+    if sum(result['scoring']['weights'].values()) <= 0:
+        raise ValueError('At least one risk weight must be positive')
     for group in ('filters', 'trend_filters'):
         overrides = configuration.get(group, {})
         if not isinstance(overrides, dict) or set(overrides) - result[group].keys():
@@ -386,6 +425,56 @@ def validate_rules():
         if direction not in ('asc', 'desc'): raise ValueError('Invalid sort direction')
 
 
+def score_contract(values, underlying, configuration):
+    """Transparent heuristic scores, independent of filter switches and peers.
+
+    Stress loss is an expiry scenario, NOT expected loss or early-close value.
+    Missing evidence is penalized and reported separately from observed risk.
+    """
+    p, weights = configuration['parameters'], configuration['weights']
+    def bounded(number): return max(0., min(100., number))
+    stress_price = values['underlying_price'] * (1-p['stress_drop_pct']/100)
+    stress_pnl = values['premium_per_contract_before_costs'] - max(values['strike']-stress_price, 0)*values['shares']
+    stress_loss_pct = 100*max(0, -stress_pnl)/values['cash_collateral']
+    reference = underlying.get('reference_rules', [])
+    trend_known = underlying['status'] == 'ok' and bool(reference)
+    trend_score = (100*sum(not r['passed'] for r in reference)/len(reference)
+                   if trend_known else p['unknown_risk_score'])
+    spread_score = bounded(100*values['spread_pct_of_mid']/p['spread_high_pct'])
+    oi_score = bounded(100*(1-values['open_interest']/p['open_interest_target']))
+    depth_score = bounded(100*(1-values['bid_size']/p['bid_size_target']))
+    earnings_known = bool(values['earnings_known'])
+    earnings_score = (bounded(100*(1-values['days_expiry_before_earnings']/p['earnings_buffer_days']))
+                      if earnings_known else p['unknown_risk_score'])
+    raw = [
+        ('delta', bounded(100*values['abs_delta']/p['delta_high']), True,
+         f"|Delta|={values['abs_delta']:.4f}，满分参考 {p['delta_high']:g}；衡量敏感度，不是指派概率。"),
+        ('stress_loss', bounded(100*stress_loss_pct/p['stress_loss_high_pct']), True,
+         f"到期股价下跌 {p['stress_drop_pct']:g}% 时，费用前损益 ${stress_pnl:,.2f}，亏损占担保本金 {stress_loss_pct:.2f}%；满分参考 {p['stress_loss_high_pct']:g}%。"),
+        ('trend', trend_score, trend_known,
+         f"默认趋势参考 {sum(not r['passed'] for r in reference)} / {len(reference)} 项未通过；不随 Filter 开关变化。" if trend_known else '缺少可验证日线，使用未知风险惩罚分。'),
+        ('liquidity', .5*spread_score+.25*oi_score+.25*depth_score, True,
+         f"价差分 {spread_score:.2f} ×50% + 未平仓量不足分 {oi_score:.2f} ×25% + 买盘数量不足分 {depth_score:.2f} ×25%；报价数量不保证成交。"),
+        ('earnings', earnings_score, earnings_known,
+         f"财报在到期后 {values['days_expiry_before_earnings']} 天；跨财报为100分，间隔达到 {p['earnings_buffer_days']:g} 天为0分。" if earnings_known else '下次财报或日历完整性未知，使用未知风险惩罚分。'),
+    ]
+    total_weight = sum(weights.values())
+    components = [dict(id=key, label=RISK_LABELS[key], score=score, known=known,
+                       weight_pct=100*weights[key]/total_weight,
+                       contribution=score*weights[key]/total_weight, explanation=detail)
+                  for key, score, known, detail in raw]
+    risk = bounded(sum(c['contribution'] for c in components))
+    returns = bounded(100*values['daily_gross_return_pct']/p['daily_return_target_pct'])
+    composite = p['return_weight']*returns + (1-p['return_weight'])*(100-risk)
+    values.update(risk_score=risk, return_score=returns, composite_score=composite, stress_loss_pct=stress_loss_pct)
+    return dict(model='heuristic_v1_unvalidated', components=components,
+                evidence_coverage_pct=sum(c['weight_pct'] for c in components if c['known']),
+                missing_components=[c['id'] for c in components if not c['known'] and weights[c['id']] > 0],
+                stress_drop_pct=p['stress_drop_pct'], stress_pnl_before_costs=stress_pnl,
+                return_contribution=p['return_weight']*returns,
+                safety_contribution=(1-p['return_weight'])*(100-risk))
+
+
 def scan(dataset, budget=None, configuration=None):
     config = resolve_configuration(configuration)
     filters = configured_rules(RULES, config['filters'])
@@ -429,6 +518,7 @@ def scan(dataset, budget=None, configuration=None):
             tm = underlying.get('metrics', {})
             values['strike_below_20d_low_atr'] = ((tm['prior_20d_low'] - values['strike']) / tm['atr14']
                                                 if tm.get('atr14', 0) > 0 else None)
+            scoring = score_contract(values, underlying, config['scoring'])
             evidence = []
             for rule_id, metric, op, threshold in filters:
                 if metric not in values: raise ValueError('Unknown rule metric: ' + metric)
@@ -446,7 +536,7 @@ def scan(dataset, budget=None, configuration=None):
             if underlying['status'] != 'ok': warnings.append('历史日线无法验证')
             elif underlying.get('baseline_failed_rules'): warnings.append('标的未通过默认趋势检查')
             if not values['same_session_snapshot']: warnings.append('报价不属于当前交易日')
-            results.append(dict(base, status='ok', eligible=eligible, metrics=values,
+            results.append(dict(base, status='ok', eligible=eligible, metrics=values, scoring=scoring,
                                 rules=evidence, failed_rules=[r['id'] for r in evidence if not r['passed']],
                                 warnings=warnings,
                                 trend_symbol=row['symbol'],
@@ -481,6 +571,12 @@ def scan(dataset, budget=None, configuration=None):
         assumption='One standard US equity/ETF put, fully cash secured, willing to accept shares; user suitability not established',
         cash_budget=budget, budget_checked=budget is not None,
         ranking_objective='Pass required data checks and enabled filters, then sort independently by sort_order',
+        scoring_model=dict(version='heuristic_v1_unvalidated', configuration=config['scoring'],
+            risk_direction='0 to 100; higher is riskier; not a probability or expected loss',
+            risk_formula='sum(component_score * weight) / sum(weights)',
+            return_formula='min(100, 100 * daily_gross_return_pct / daily_return_target_pct)',
+            composite_formula='return_weight * return_score + (1 - return_weight) * (100 - risk_score)',
+            limitations='Provisional correlated factors and subjective scales; no calibration, news, portfolio exposure or expected-return model. Zero stress loss is not zero overall risk.'),
         configuration=config, default_configuration=default_configuration(),
         disabled_filters=[rid for rid, option in config['filters'].items() if not option['enabled']],
         filter_impact=impacts, relaxation_preview=previews,
@@ -504,8 +600,8 @@ def scan(dataset, budget=None, configuration=None):
         ])
 
 
-def recommend(dataset, budget=None, configuration=None, top_n=3):
-    """Hard risk boundaries -> daily premium yield ranking -> date/strike comparison.
+def recommend(dataset, budget=None, configuration=None, top_n=10):
+    """Hard risk boundaries -> selected return/risk ranking -> strict Top N.
 
     This is a constrained research ranking, not expected profit or an investment
     suitability judgement. Every eligible contract is ranked; no soft score cutoff.
@@ -514,13 +610,15 @@ def recommend(dataset, budget=None, configuration=None, top_n=3):
     config = recommendation_configuration(configuration)
     report = scan(dataset, budget, config)
     ranked = report['ranked']
+    views = {}
+    for mode, order in RANKING_SORT_ORDERS.items():
+        ordered = sorted(ranked, key=lambda row: tuple((-1 if direction == 'desc' else 1)*row['metrics'][metric]
+                         for metric, direction in order) + (row['code'],))
+        views[mode] = [row['code'] for row in ordered[:top_n]]
+        for index, row in enumerate(ordered, 1): row[mode + '_rank'] = index
     by_expiry = {}
     for row in ranked: by_expiry.setdefault(row['expiration'], row)
-    chosen = list(by_expiry.values())[:top_n]
-    used = {row['code'] for row in chosen}
-    for row in ranked:
-        if len(chosen) >= top_n: break
-        if row['code'] not in used: chosen.append(row)
+    chosen = ranked[:top_n]
     recommendations = []
     for number, row in enumerate(chosen, 1):
         m = row['metrics']
@@ -528,6 +626,7 @@ def recommend(dataset, budget=None, configuration=None, top_n=3):
             f"通过当前全部风险边界，在 {len(ranked)} 个候选中排序第 {row['rank']}。",
             f"每张权利金 ${m['premium_per_contract_before_costs']:,.2f} ÷ 担保现金 ${m['cash_collateral']:,.2f} ÷ {m['days_to_expiry']} 天，日均毛收益率 {m['daily_gross_return_pct']:.4f}%。",
             f"行权价 ${m['strike']:,.2f}，较现价低 {m['otm_pct']:.2f}%；费用前盈亏平衡价 ${m['breakeven_before_costs']:,.2f}。",
+            f"收益分 {m['return_score']:.2f}，风险分 {m['risk_score']:.2f}（越高越危险），综合分 {m['composite_score']:.2f}。评分为未校准的研究模型。",
         ]
         notes = list(row['warnings'])
         if not report['budget_checked']: notes.append('尚未提供单张现金预算，未判断担保资金是否适合个人账户')
@@ -535,7 +634,7 @@ def recommend(dataset, budget=None, configuration=None, top_n=3):
         comparisons = [f"|Delta|={m['abs_delta']:.3f}，买卖价差为中间价的 {m['spread_pct_of_mid']:.2f}%。",
                        f"最大权利金收益 ${m['max_profit_before_costs']:,.2f}，股票归零时最大亏损 ${m['max_loss_before_costs']:,.2f}；不含费用。"]
         if row['rank'] != 1:
-            comparisons.append(f"作为不同到期日/行权价的备选；其排序低于总体第一名 {ranked[0]['code']}。")
+            comparisons.append(f"属于当前排序的 Top {len(chosen)}；其排序低于总体第一名 {ranked[0]['code']}。")
         scenarios = [dict(stock_change_pct=change,
                           stock_price=m['underlying_price']*(1+change/100),
                           pnl_before_costs=m['premium_per_contract_before_costs'] -
@@ -547,6 +646,9 @@ def recommend(dataset, budget=None, configuration=None, top_n=3):
             bid=m['bid'], ask=m['ask'], premium_per_contract_before_costs=m['premium_per_contract_before_costs'],
             cash_collateral=m['cash_collateral'], daily_gross_return_pct=m['daily_gross_return_pct'],
             gross_return_pct=m['gross_return_pct'], annualized_gross_return_pct=m['annualized_gross_return_pct'],
+            return_score=m['return_score'], risk_score=m['risk_score'], composite_score=m['composite_score'],
+            return_rank=row['return_rank'], risk_rank=row['risk_rank'], balanced_rank=row['balanced_rank'],
+            scoring=row['scoring'],
             breakeven_before_costs=m['breakeven_before_costs'], max_loss_before_costs=m['max_loss_before_costs'],
             reasons=reasons, tradeoffs=comparisons, risk_notes=notes, scenarios=scenarios,
             data_collected_at=report['collected_at'], snapshot_update_time=row['snapshot_update_time']))
@@ -557,7 +659,8 @@ def recommend(dataset, budget=None, configuration=None, top_n=3):
         comparison_basis=dict(default_metric='daily_gross_return_pct', actual_sort_order=report['sort_order'],
             formula='100 * premium_per_contract_before_costs / cash_collateral / days_to_expiry',
             meaning='Average gross premium per calendar day on full strike cash collateral; assumes entire premium retained, not realized daily profit',
-            selection_policy='Best overall first, then best per distinct expiration, then remaining highest ranked contracts'),
+            selection_policy='First top_n contracts in the actual sort order, without expiration diversification'),
+        top_n_requested=top_n, ranking_views=views,
         recommendations=recommendations, best_recommendation=recommendations[0] if recommendations else None,
         default_configuration=recommendation_configuration(),
         expiration_comparisons=[dict(expiration=expiry, best_code=row['code'], strike=row['metrics']['strike'],
@@ -565,7 +668,7 @@ def recommend(dataset, budget=None, configuration=None, top_n=3):
                                 for expiry, row in by_expiry.items()],
         boundary_origin='illustrative_basic_defaults' if configuration is None else 'explicit_configuration_over_basic_defaults',
         personal_suitability_assessed=False,
-        ranking_objective='Pass explicit hard boundaries, rank every survivor by selected capital/time return metric, and explain date/strike alternatives')
+        ranking_objective='Pass explicit hard boundaries, rank every survivor by selected return/risk/composite metrics, and return strict Top N')
     return report
 
 
@@ -579,12 +682,16 @@ def main(argv=None):
     parser.add_argument('--budget', type=float, help='Maximum USD cash for ONE assigned contract; omitted means not checked')
     parser.add_argument('--config', type=Path, help='JSON with explicit filter toggles/thresholds and independent sort_order')
     parser.add_argument('--csv-output', type=Path, help='Export qualified candidates and the separate earnings-unverified watchlist')
-    parser.add_argument('--top', type=int, default=3)
+    parser.add_argument('--top', type=int, default=10)
+    parser.add_argument('--rank-by', choices=RANKING_SORT_ORDERS, help='Override sorting: return, risk or balanced; filters remain unchanged')
     parser.add_argument('--scan-only', action='store_true', help='Use the legacy full-filter scan without date/strike recommendations')
     args = parser.parse_args(argv)
     try:
         if args.top < 1: raise ValueError('--top must be positive')
         config = json.loads(args.config.read_text(encoding='utf-8')) if args.config else None
+        if args.rank_by:
+            config = resolve_configuration(config) if args.scan_only else recommendation_configuration(config)
+            config['sort_order'] = [list(item) for item in RANKING_SORT_ORDERS[args.rank_by]]
         dataset = json.loads(args.input.read_text(encoding='utf-8'))
         report = scan(dataset, args.budget, config) if args.scan_only else recommend(dataset, args.budget, config, args.top)
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -595,6 +702,8 @@ def main(argv=None):
                        'abs_delta', 'otm_pct', 'spread_pct_of_mid', 'volume', 'open_interest',
                        'premium_per_contract_before_costs', 'cash_collateral', 'gross_return_pct',
                        'daily_gross_return_pct', 'annualized_gross_return_pct', 'breakeven_before_costs', 'max_loss_before_costs',
+                       'return_score', 'risk_score', 'composite_score', 'stress_loss_pct', 'evidence_coverage_pct',
+                       *[key + '_risk_score' for key in RISK_WEIGHTS],
                        'pnl_at_spot_minus_20_pct', 'live_review_ready', 'snapshot_update_time', 'blocked_rules',
                        'earnings_known', 'trend_allowed', 'warnings']
             args.csv_output.parent.mkdir(parents=True, exist_ok=True)
@@ -605,13 +714,15 @@ def main(argv=None):
                     for row in candidates:
                         writer.writerow(dict(row['metrics'], **{k: row[k] for k in ('code', 'symbol', 'expiration', 'live_review_ready', 'snapshot_update_time')},
                                              category=category, rank=row.get('rank', row.get('watchlist_rank')),
+                                             evidence_coverage_pct=row['scoring']['evidence_coverage_pct'],
+                                             **{c['id'] + '_risk_score': c['score'] for c in row['scoring']['components']},
                                              blocked_rules=','.join(row['failed_rules']), warnings='; '.join(row.get('warnings', []))))
         print(f'{report["qualified_count"]} / {report["total_contracts"]} contracts pass every rule; session {report["session_date"]}')
         print('Research ranking; gross estimates before costs. Refresh quotes and confirm earnings before any trade.')
         if not args.scan_only:
             print(report['decision_summary'])
             for choice in report['recommendations']:
-                print(f"Choice {choice['recommendation_rank']}: {choice['expiration']} strike={choice['strike']:.2f} daily_gross={choice['daily_gross_return_pct']:.4f}%")
+                print(f"Choice {choice['recommendation_rank']}: {choice['expiration']} strike={choice['strike']:.2f} daily_gross={choice['daily_gross_return_pct']:.4f}% risk={choice['risk_score']:.2f} composite={choice['composite_score']:.2f}")
                 for reason in choice['reasons'] + choice['tradeoffs'] + choice['risk_notes']: print('  ' + reason)
         for symbol, underlying in report['underlyings'].items():
             if underlying['status'] == 'ok':
