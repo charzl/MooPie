@@ -21,6 +21,7 @@ for command in ('options', 'collect', 'analyze', 'mcp', 'doctor'):
     run(*launcher, command, '--help')
 for directory, pattern in [('tests/unit', 'test_setup_*.py'), ('apps/python/tests/unit', 'test_doctor.py'),
                            ('apps/python/tests/unit', 'test_market_collection.py'), ('apps/python/tests/mcp', 'test*.py'),
+                           ('apps/python/tests/unit', 'test_research.py'),
                            ('modules/put-screener/tests', 'test*.py')]:
     run(sys.executable, '-m', 'unittest', 'discover', '-s', directory, '-p', pattern, '-v')
 run(*launcher, 'analyze', 'modules/put-screener/example.json', '--output', 'artifacts/platform-check/report.json')

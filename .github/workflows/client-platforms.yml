@@ -1,10 +1,10 @@
 name: Client platform CI
 on:
   pull_request:
-    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', '.github/workflows/client-platforms.yml']
+    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', 'scripts/build-windows.py', '.github/workflows/client-platforms.yml']
   push:
     branches: [main]
-    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', '.github/workflows/client-platforms.yml']
+    paths: ['setup.*', 'moomoo*', 'apps/python/**', 'modules/put-screener/**', 'tests/unit/test_setup_*.py', 'scripts/ci-platform.py', 'scripts/build-windows.py', '.github/workflows/client-platforms.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -46,11 +46,28 @@ jobs:
         run: '& "${{ matrix.python }}" scripts/ci-platform.py'
       - name: Build Python wheel
         run: uv build --python "${{ matrix.python }}" --no-build-isolation --wheel apps/python --out-dir artifacts/platform-wheel
+      - name: Check standalone research wheel
+        run: |
+          $MoomooWheel = (Get-ChildItem artifacts/platform-wheel/*.whl)[0].FullName
+          & "${{ matrix.python }}" scripts/check-research-wheel.py $MoomooWheel
+      - name: Install desktop build dependencies
+        run: uv pip install --python "${{ matrix.python }}" -r apps/python/requirements-build.txt
+      - name: Test desktop UI
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: apps/python
+          PYTHONUTF8: '1'
+        run: '& "${{ matrix.python }}" -m unittest discover -s apps/python/tests/integration -p test_research_ui.py -v'
+      - name: Package and smoke-test Windows desktop
+        if: runner.os == 'Windows'
+        run: '& "${{ matrix.python }}" scripts/build-windows.py'
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: moomoo-tools-${{ matrix.platform }}
           path: |
             artifacts/platform-wheel/*.whl
             artifacts/platform-check/report.json
+            apps/python/dist/MooPie-windows-x64.zip
+            artifacts/MooPie-windows-preview.png
           if-no-files-found: error
           retention-days: 14

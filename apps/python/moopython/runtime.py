@@ -10,7 +10,7 @@ class OpenDRuntime(QObject):
     def available(self): return (self.directory/'OpenDManager').is_file()
     def run(self,action='launch'):
         if not self.available:
-            self.status.emit('当前是源码运行；请连接已安装的官方 OpenD'); return
+            self.status.emit('请启动并登录官方 OpenD，再点击分析；默认连接本机 11111 端口'); return
         if self.process is not None:
             self.status.emit('OpenD 正在启动或检查更新，请稍候'); return
         try: version=json.loads((self.directory/'opend.json').read_text())['version']

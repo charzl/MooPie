@@ -28,7 +28,7 @@ jobs:
           python -m moopython.market_mcp --help
       - name: Download Apple Silicon MCP dependencies for offline installation
         run: |
-          python -m pip download --only-binary=:all: --platform macosx_14_0_arm64 --python-version 3.14 --implementation cp --abi cp314 'mcp>=2.3,<3' --dest artifacts/mcp-dependencies
+          python -m pip download --only-binary=:all: --platform macosx_14_0_arm64 --python-version 3.14 --implementation cp --abi cp314 'mcp>=2.3,<3' 'tzdata>=2025.2' --dest artifacts/mcp-dependencies
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: mcp-dependencies-macos-arm64

@@ -13,6 +13,10 @@ dynamic = ["dependencies"]
 moomoo-options = "moopython.options_cli:main"
 moomoo-data = "moopython.market_data_cli:main"
 moomoo-mcp = "moopython.market_mcp:main"
+moomoo-research = "moopython.research_cli:main"
+
+[project.gui-scripts]
+moomoo-desktop = "moopython.research_ui:main"
 
 [project.optional-dependencies]
 mcp = ["mcp>=2.3,<3"]

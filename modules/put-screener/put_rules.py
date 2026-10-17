@@ -14,7 +14,7 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.2.0'
+ENGINE_VERSION = '0.2.1'
 RULESET_VERSION = '1.1.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # All must pass BEFORE comparing put premiums. Oversold alone is not a buy signal.
@@ -174,6 +174,29 @@ def trend(series, session_date, collected_at):
     return dict(symbol=series['symbol'], status='ok', as_of=as_of.isoformat(),
                 available_at=series['available_at'], bar_count=len(bars), state=state,
                 allowed=not failed, metrics=values, rules=evidence, failed_rules=failed)
+
+
+def describe_trend(evidence):
+    """Editable interpretation of validated daily indicators; no price forecast."""
+    m = evidence['metrics']
+    state = evidence['state']
+    heading = {'downtrend': '偏弱，仍有继续下跌的压力',
+               'uptrend': '趋势偏强，关注回调后的承接',
+               'mixed_or_weakening': '方向分歧，暂未形成一致趋势'}[state]
+    reasons = [
+        f"收盘 {m['close']:.2f}，MA20 / MA50 / MA200 为 {m['ma20']:.2f} / {m['ma50']:.2f} / {m['ma200']:.2f}",
+        f"MA50 五日斜率 {m['ma50_slope_5d_pct']:+.2f}%，RSI14 {m['rsi14']:.1f}",
+        f"MACD 柱 {m['macd_histogram']:.3f}，较前日变化 {m['macd_histogram_change']:+.3f}",
+        '已跌破此前 20 日低点' if m['breakdown_20d'] else '尚未跌破此前 20 日低点',
+    ]
+    if m['volume_ratio_20d'] is not None:
+        reasons.append(f"成交量为此前 20 日均量的 {m['volume_ratio_20d']:.2f} 倍")
+    return dict(heading=heading, horizon='未来 5–20 个交易日的条件判断', reasons=reasons,
+        levels=[dict(label='此前 20 日低点（跌破后关注收复）' if m['breakdown_20d'] else '此前 20 日低点', value=m['prior_20d_low']),
+                dict(label='此前 60 日低点', value=m['prior_60d_low']),
+                dict(label='MA20', value=m['ma20']), dict(label='MA50', value=m['ma50'])],
+        change_condition='站上 MA50、均线止跌且 MACD 动能改善时，偏弱判断才有改善依据；跌破前低则下行压力增加。',
+        limitation='基于已完成日线，不覆盖盘中变化、新闻与估值，也不提供经过校准的涨跌概率。')
 
 
 def metrics(row, session_date, collected_at):

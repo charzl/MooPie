@@ -3,6 +3,9 @@ import os
 import sys
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'research':
+        from moopython.research_cli import main as research_main
+        return research_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == 'options':
         from moopython.options_cli import main as options_main
         return options_main(sys.argv[2:])
@@ -12,6 +15,7 @@ def main():
     parser.add_argument("--benchmark-output")
     parser.add_argument("--quit-after",type=int,default=0)
     parser.add_argument("--host")
+    parser.add_argument("--classic", action="store_true", help="Open the full market dashboard")
     parser.add_argument("--port",type=int,default=11111)
     args=parser.parse_args()
     if args.sdk_check:
@@ -19,7 +23,7 @@ def main():
         assert callable(moomoo.OpenQuoteContext)
         import json,pathlib
         manifest=pathlib.Path(sys.executable).resolve().parent.parent/'Resources/build-manifest.json'
-        if getattr(sys,'frozen',False):
+        if getattr(sys,'frozen',False) and sys.platform == 'darwin':
             expected=json.loads(manifest.read_text())['sdk']['version']
             assert moomoo.__version__==expected, f'SDK version mismatch: {moomoo.__version__} vs {expected}'
         print(json.dumps(dict(sdk_version=moomoo.__version__,implementation='python-qt')))
@@ -32,7 +36,12 @@ def main():
         os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import QTimer
-    from moopython.ui import MainWindow
+    from moopython.research import load_rules
+    load_rules()  # Validate packaged rule availability before presenting the UI.
+    if args.classic or args.benchmark_output:
+        from moopython.ui import MainWindow
+    else:
+        from moopython.research_ui import ResearchWindow as MainWindow
     app=QApplication([sys.argv[0]])
     app.setApplicationName("MooPie")
     settings=None
@@ -41,6 +50,7 @@ def main():
         settings=QSettings(args.benchmark_output+".settings.ini",QSettings.Format.IniFormat)
         settings.clear()
     window=MainWindow(settings=settings); window.show()
+    if hasattr(window, 'port'): window.port.setValue(args.port)
     if args.benchmark_output:
         from moopython.benchmark import start
         start(window,args.benchmark_output)
@@ -50,7 +60,7 @@ def main():
         window.opend_update_timer.setInterval(24*60*60*1000)
         window.opend_update_timer.timeout.connect(lambda:window.runtime.run('check'))
         window.opend_update_timer.start()
-    if args.host:
+    if args.host and hasattr(window, 'connect_gateway'):
         QTimer.singleShot(100,lambda:window.connect_gateway(args.host,args.port))
     if args.render_preview:
         def render():

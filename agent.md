@@ -15,7 +15,7 @@ command -v uv
 ./moomoo --help
 ```
 
-保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前安装简化分支为 `codex/simple-setup`。不要为安装强制清空工作区或覆盖其他配置。
+保留现有修改和已经可用的环境。功能尚未合并主线时，确认当前分支有 `setup.sh`、`moomoo` 和 `apps/python/moopython/market_mcp.py`；当前研究桌面分支为 `codex/research-desktop`。不要为安装强制清空工作区或覆盖其他配置。
 
 项目要求 Python `>=3.14,<3.15`。默认安装 CLI/MCP，桌面是可选功能。不修改系统 Python，不要求用户手动激活虚拟环境。以 `apps/python/pyproject.toml` 和 `requirements.txt` 为依赖依据，更新版本时同步检查构建依赖。
 
@@ -138,7 +138,11 @@ apps/python/.venv/bin/python -m unittest discover -s modules/put-screener/tests 
 PYTHONPATH=apps/python apps/python/.venv/bin/python -m unittest discover -s apps/python/tests/mcp -v
 ```
 
-跨平台工作流 `.github/workflows/client-platforms.yml` 必须同时跑 Windows 和 macOS 安装、命令、MCP、规则和 wheel。Windows 使用 PowerShell 真正执行，macOS 用 Bash；Windows 专项测试验证带空格路径、退出码与保留不完整环境。macOS 打包工作流继续负责 DMG；当前不把 wheel 称作 Windows EXE 安装器。
+跨平台工作流 `.github/workflows/client-platforms.yml` 必须同时跑 Windows 和 macOS 安装、命令、MCP、规则、独立 wheel 和研究界面测试。Windows 使用 PowerShell 真正执行，macOS 用 Bash；Windows 专项测试验证带空格路径、退出码与保留不完整环境。Windows 构建便携 EXE ZIP 并验证启动与 JSON 错误协议；macOS 打包工作流负责 DMG。不要把 wheel 或便携 ZIP 称作安装向导。
+
+桌面默认是 `research_ui.py`：一个股票输入框，筛选 Put / 分析走势两个按钮。通过 `QProcess` 运行 `research_cli.py`，后者调用 `research.py` 和共享抓取服务，SDK 在子进程主线程运行。窗口关闭/取消会停止子进程。冻结的 windowed EXE 通过临时 JSON 文件返回结果，不依赖 stdout；不要改为 GUI 线程直接请求 SDK。真实失败保留为空，不填演示报价。
+
+规则、阈值、排序和趋势解释仍只维护 `modules/put-screener/put_rules.py`。`setup.py` 仅在 wheel/sdist 构建时拷贝快照，PyInstaller 同样包含该文件。源码总是优先读取独立文件；修改分发包规则要重新构建。不要手动维护第二套规则。运行研究界面测试：`PYTHONPATH=apps/python QT_QPA_PLATFORM=offscreen apps/python/.venv/bin/python -m unittest discover -s apps/python/tests/integration -p test_research_ui.py -v`。
 
 协议测试使用合成 provider，不证明个人行情权限；`doctor` 和实际调用验证真实 OpenD。行为修改运行相应测试，文档修改检查链接和示例命令。完整 DMG 在 CI 构建，本地做必要测试和 wheel 验证即可。
 

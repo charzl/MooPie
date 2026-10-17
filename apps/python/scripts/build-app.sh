@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -m PyInstaller --noconfirm --clean --windowed --name MooPie \
   --icon ../../assets/AppIcon.icns --add-data "../../fixtures/market.json:fixtures" \
+  --add-data "../../modules/put-screener/put_rules.py:." --collect-data tzdata \
   --osx-bundle-identifier local.charlie.moopython --hidden-import moomoo --collect-data moomoo main.py
 codesign --force --deep --sign - dist/MooPie.app
 python3 ../../scripts/bundle-opend.py --updater-only dist/MooPie.app

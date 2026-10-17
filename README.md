@@ -1,6 +1,6 @@
 # Moomoo 行情工具
 
-抓取股票趋势分析所需的日线、期权合约和报价，用独立规则文件筛选卖 Put 的研究候选，也可让 agent 通过本地 MCP 调用。AVGO、NVDA、AAPL 都只是示例，当前研究工具支持美股标的。
+输入一个美股代码，点击「筛选卖出 Put」或「分析走势」。桌面界面使用同一套抓取服务和独立规则文件，支持 macOS 和 Windows；也可通过 CLI 和本地 MCP 调用。AVGO、NVDA、AAPL 都只是示例。
 
 **首次使用：安装工具 → 在官方 OpenD 登录 → 检查连接 → 开始查询。** 给 agent 的完整操作指南见 [agent.md](agent.md)，自动发现入口为 [AGENTS.md](AGENTS.md)。
 
@@ -8,10 +8,10 @@
 
 需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。macOS 缺少 uv 时运行 `brew install uv`；Windows 用 `winget install --id=astral-sh.uv -e`，安装后重开终端。脚本会准备 Python **3.14**，无需自己激活虚拟环境。
 
-当前安装简化功能位于 `codex/simple-setup` 分支，首次下载对应版本：
+当前研究桌面功能位于 `codex/research-desktop` 分支，首次下载对应版本：
 
 ```sh
-git clone --branch codex/simple-setup https://github.com/charzl/moomoo-clients.git
+git clone --branch codex/research-desktop https://github.com/charzl/moomoo-clients.git
 cd moomoo-clients
 ./setup.sh
 ```
@@ -138,13 +138,29 @@ Windows JSON 配置把 `command` 换成实际 `C:/.../apps/python/.venv/Scripts/
 ./moomoo desktop
 ```
 
-Windows 对应 `setup.ps1 -Desktop` 和 `moomoo.ps1 desktop`。CLI/MCP 与 wheel 在 Windows 和 macOS 各自的 CI runner 验证；Windows 当前提供 Python wheel，尚不生成桌面 EXE 安装器。
+Windows 在 PowerShell 执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Desktop
+powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
+```
+
+输入股票代码，选择一个功能：
+
+- **筛选卖出 Put**：抓取未来三个月合约、报价、日线和财报。通过全部风险条件后，返回规则排名第一的合约，显示到期日、行权价、Bid/Ask、权利金、担保现金、年化比较值、盈亏平衡和最大亏损。当前规则限定 21–60 天到期。没有合格候选就说明未通过的条件；财报未知时不自动放行。
+- **分析走势**：用已完成日线计算 MA20/50/200、RSI、MACD 和成交量，展示未来 5–20 个交易日的条件判断、关键价位及改判依据。它不是盘中预测或涨跌概率模型。
+
+两个结果均标注股票、数据时间，可导出完整 JSON。查询在独立进程运行，可以取消；输入另一只股票会清空旧结果。默认连接本机 OpenD，界面可改端口。无需配置 MCP 或外部 AI API Key。
+
+Put 排序依据保留在 [put_rules.py](modules/put-screener/put_rules.py)，趋势解释在同文件的 `describe_trend()`。源码运行修改后立即生效；wheel 和桌面分发包带构建时的规则快照，修改后需要重新打包。原有行情面板可用 `./moomoo desktop --classic` 打开。
+
+Windows 可在成功的 **Client platform CI** 中下载 `moomoo-tools-Windows`，取其中 `MooPie-windows-x64.zip`，完整解压后双击文件夹内的 `MooPie.exe`。这是便携版，不是安装向导；不需要另装 Python，但仍需安装并登录官方 OpenD。
 
 macOS 也可从成功的 GitHub Actions 或 Releases 下载 `MooPie-macos-arm64`，打开 DMG 并拖到 Applications。打包应用的 OpenD 管理器可独立下载、验签和启动官方 OpenD；仍需在其官方窗口登录。DMG 不会替 agent 宿主注册 MCP。
 
 ## 开发与更多说明
 
-抓取和 MCP 共用 Python 服务；规则保留为独立文件。当前保存 JSON，数据库和旧数据清理后续再做。正式 wheel 提供 `moomoo-options`、`moomoo-data`、`moomoo-mcp`；根目录 `./moomoo` 是方便源码使用的统一入口。
+桌面、CLI 和 MCP 共用 Python 抓取服务；规则保留为独立文件。当前保存 JSON，数据库和旧数据清理后续再做。wheel 提供 `moomoo-options`、`moomoo-data`、`moomoo-mcp`、`moomoo-research`；安装 desktop extra 后还可运行 `moomoo-desktop`。根目录 `./moomoo` 是方便源码使用的统一入口。
 
 - [agent 安装、验证与排查](agent.md)
 - [数据接口与架构](docs/market-data.md)
@@ -154,4 +170,4 @@ macOS 也可从成功的 GitHub Actions 或 Releases 下载 `MooPie-macos-arm64`
 
 完整 DMG 交给 GitHub CI 构建；本地做开发、必要测试和 wheel 验证。CI 不登录个人 OpenD，真实数据权限以本机 `doctor` 和实际 MCP 调用为准。
 
-跨平台 CI 见 [client-platforms.yml](.github/workflows/client-platforms.yml)：**Windows / install, test and wheel** 与 **macOS / install, test and wheel** 独立运行，验证安装、无 Qt 默认依赖、命令、MCP、规则和 wheel。每个平台产物分别保存；macOS DMG 另由现有打包工作流生成。
+跨平台 CI 见 [client-platforms.yml](.github/workflows/client-platforms.yml)：Windows 与 macOS 独立验证安装、无 Qt 默认依赖、命令、MCP、规则、独立 wheel 和界面。Windows 额外打包并实际启动 EXE；macOS DMG 由现有打包工作流生成并验证。
