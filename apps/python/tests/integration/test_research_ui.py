@@ -12,7 +12,7 @@ from PySide6.QtGui import QFont, QRawFont
 from PySide6.QtWidgets import QApplication
 from moopython.research import load_rules
 from moopython.research_ui import ResearchWindow
-from moopython.research_controls import FilterSortDialog
+from moopython.research_controls import FilterDialog
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -31,7 +31,8 @@ class ResearchUiTests(unittest.TestCase):
 
     def result(self):
         return dict(action='put', symbol=self.dataset['contracts'][0]['symbol'],
-                    collected_at=self.dataset['collected_at'], report=load_rules().recommend(self.dataset))
+                    collected_at=self.dataset['collected_at'], report=load_rules().recommend(self.dataset,
+                        configuration=self.window.configuration, top_n=self.window.top_count.currentData()))
 
     def test_packaged_font_has_both_chinese_and_latin_glyphs(self):
         font = QRawFont.fromFont(QFont('Noto Sans SC', 14))
@@ -52,12 +53,14 @@ class ResearchUiTests(unittest.TestCase):
         self.assertEqual(self.window.configuration, chosen)
         self.assertEqual(settings.value('filter_sort_configuration'), old)
 
-    def test_filter_editor_and_sort_editor_are_independent(self):
-        dialog = FilterSortDialog(self.window.configuration, parent=self.window)
+    def test_filter_editor_has_no_sort_tab_and_preserves_header_sort(self):
+        self.window.sort_candidates('strike', 'desc')
+        dialog = FilterDialog(self.window.configuration, parent=self.window)
         try:
-            metric, direction = dialog.sort_controls[0]
-            metric.setCurrentIndex(metric.findData('cash_collateral')); direction.setCurrentIndex(direction.findData('asc'))
+            self.assertEqual([dialog.tabs.tabText(i) for i in range(dialog.tabs.count())],
+                             ['Filter 过滤', '收益 / 风险评分'])
             original_sort = dialog.configuration()['sort_order']
+            self.assertEqual(original_sort[0], ['strike', 'desc'])
             dialog.disable_optional()
             disabled = dialog.configuration()
             self.assertTrue(disabled['filters']['standard-contract']['enabled'])
@@ -71,6 +74,7 @@ class ResearchUiTests(unittest.TestCase):
 
     def test_applying_filters_reuses_data_offline_and_persists_choices(self):
         self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        self.window.sort_candidates('cash_collateral', 'asc')
         self.dataset['contracts'][0]['earnings'] = None
         result = self.result(); result['input_dataset'] = self.dataset
         self.window.display(result)
@@ -78,11 +82,9 @@ class ResearchUiTests(unittest.TestCase):
         def choose():
             dialog = self.app.activeModalWidget()
             try:
-                self.assertIsInstance(dialog, FilterSortDialog)
+                self.assertIsInstance(dialog, FilterDialog)
                 for rid in ('earnings-checked', 'earnings-buffer'):
                     dialog.controls[('filters', rid)][0].setChecked(False)
-                metric, direction = dialog.sort_controls[0]
-                metric.setCurrentIndex(metric.findData('cash_collateral')); direction.setCurrentIndex(direction.findData('asc'))
                 dialog.configuration()
                 dialog.apply()
             except Exception as error:
@@ -122,13 +124,17 @@ class ResearchUiTests(unittest.TestCase):
                 self.assertEqual(report['collected_at'], self.dataset['collected_at'])
                 expected = [list(item) for item in load_rules().RANKING_SORT_ORDERS[mode]]
                 self.assertEqual(report['sort_order'], expected)
-        self.assertIn('风险分↓', self.window.put_result.toPlainText())
-        self.assertIn('Top 10', self.window.put_result.toPlainText())
-        self.assertIn('到期 / 天数', self.window.put_result.toPlainText())
-        self.assertIn('行权价 / 成本', self.window.put_result.toPlainText())
+                self.assertEqual(self.window.candidate_table.rowCount(), len(report['recommendations']))
+                self.assertEqual([self.window.candidate_table.item(i, 1).toolTip()
+                                  for i in range(self.window.candidate_table.rowCount())],
+                                 [c['code'] for c in report['recommendations']])
+        self.assertIn('风险分', self.window.candidate_table.horizontalHeaderItem(12).text())
+        self.assertIn('Top 10', self.window.ranking_title.text())
+        self.assertEqual(self.window.candidate_table.horizontalHeaderItem(2).text(), '到期日')
+        self.assertEqual(self.window.candidate_table.horizontalHeaderItem(4).text(), '行权价 / 担保')
 
     def test_score_editor_changes_scoring_without_touching_filters_or_sort(self):
-        dialog = FilterSortDialog(self.window.configuration, parent=self.window)
+        dialog = FilterDialog(self.window.configuration, parent=self.window)
         try:
             before = dialog.configuration()
             dialog.score_controls[('parameters', 'return_weight')].setValue(.3)
@@ -159,7 +165,8 @@ class ResearchUiTests(unittest.TestCase):
                 self.assertEqual(report['qualified_count'], 25)
                 self.assertEqual([r['code'] for r in report['recommendations']], report['ranked_codes'][:count])
                 self.assertEqual(self.window.put_dataset, self.dataset)
-                self.assertIn(f'Top {count}', self.window.put_result.toPlainText())
+                self.assertIn(f'Top {count}', self.window.ranking_title.text())
+                self.assertEqual(self.window.candidate_table.rowCount(), count)
                 self.assertEqual(int(self.window.settings.value('put_top_n')), count)
 
     def test_combined_cost_return_risk_date_filters_then_top_ten_offline(self):
@@ -169,7 +176,7 @@ class ResearchUiTests(unittest.TestCase):
                 strike=90-index*.5, snapshot_strike=90-index*.5))
         result = self.result(); result['input_dataset'] = self.dataset
         self.window.display(result)
-        dialog = FilterSortDialog(self.window.configuration, parent=self.window)
+        dialog = FilterDialog(self.window.configuration, parent=self.window)
         try:
             for rid, value in [('min-cost', 8000), ('max-cost', 8800), ('min-daily-return', .01), ('max-risk', 90)]:
                 check, field = dialog.controls[('filters', rid)]; check.setChecked(True); field.setValue(value)
@@ -198,10 +205,13 @@ class ResearchUiTests(unittest.TestCase):
         result = self.result(); self.window.display(result)
         text = self.window.put_result.toPlainText()
         self.assertIn(result['report']['best_research_code'], text)
-        for phrase in ('现金担保要求', '最大亏损', '简单年化', '未校验个人资金预算', '日均毛收益率', '规则引擎的到期日', '不是实际每天到账'): self.assertIn(phrase, text)
+        for phrase in ('现金担保要求', '最大亏损', '简单年化', '未校验个人资金预算', '日均毛收益率', '不是实际每天到账'): self.assertIn(phrase, text)
+        self.assertEqual(self.window.candidate_table.rowCount(), 1)
+        self.assertEqual(self.window.tabs.currentIndex(), 0)
         self.assertTrue(self.window.export_button.isEnabled())
         self.window.symbol.setText('NVDA')
         self.assertFalse(self.window.results)
+        self.assertEqual(self.window.candidate_table.rowCount(), 0)
         self.assertNotIn('最大亏损', self.window.put_result.toPlainText())
         self.assertFalse(self.window.export_button.isEnabled())
 
@@ -215,6 +225,111 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('实际值', self.window.put_result.toPlainText())
         self.assertIn('RSI14', self.window.put_result.toPlainText())
         self.assertIn('合约条件逐项检查', self.window.put_result.toPlainText())
+        self.assertEqual(self.window.candidate_table.rowCount(), 0)
+        self.assertFalse(self.window.details_button.isEnabled())
+        self.assertIn('没有符合', self.window.ranking_message.text())
+
+    def test_selecting_a_candidate_shows_its_own_values_and_evidence(self):
+        self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code='US.TEST-SECOND',
+                                             bid=1.6, ask=1.7, delta=-.29))
+        result = self.result(); self.window.display(result)
+        choice = result['report']['recommendations'][1]
+        self.window.candidate_table.selectRow(1)
+        self.app.processEvents()
+        text = self.window.put_result.toPlainText()
+        self.assertIn(choice['code'], text)
+        self.assertIn(f'${choice["max_loss_before_costs"]:,.2f}', text)
+        self.assertIn(f'风险分 {choice["risk_score"]:.2f}', text)
+        self.assertIn('所选合约的评分依据', text)
+        self.assertIn(choice['code'], self.window.selection_hint.text())
+        self.window.details_button.click()
+        self.assertEqual(self.window.tabs.currentIndex(), 1)
+
+    def test_header_sort_reranks_full_dataset_before_taking_top_five(self):
+        self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        for index in range(1, 25):
+            self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code=f'US.TEST-HEADER-{index}',
+                strike=90-index*.5, snapshot_strike=90-index*.5))
+        result = self.result(); result['input_dataset'] = self.dataset
+        self.window.display(result)
+        self.window.top_count.setCurrentIndex(self.window.top_count.findData(5))
+        deadline = time.monotonic()+15
+        while self.window.process is not None and time.monotonic() < deadline:
+            self.app.processEvents(); time.sleep(.01)
+        before = self.window.results['put']['report']
+        original_top = {c['code'] for c in before['recommendations']}
+        for direction in ('asc', 'desc'):
+            self.window.candidate_table.horizontalHeader().sectionClicked.emit(4)
+            deadline = time.monotonic()+15
+            while self.window.process is not None and time.monotonic() < deadline:
+                self.app.processEvents(); time.sleep(.01)
+            self.assertIsNone(self.window.process)
+            report = self.window.results['put']['report']
+            self.assertEqual(report['sort_order'][0], ['strike', direction])
+            self.assertEqual(report['qualified_count'], 25)
+            self.assertEqual(report['collected_at'], self.dataset['collected_at'])
+            self.assertEqual(len(report['recommendations']), 5)
+        highest_cost = max(report['ranked'], key=lambda r:r['metrics']['cash_collateral'])
+        self.assertNotIn(highest_cost['code'], original_top)
+        self.assertEqual(report['recommendations'][0]['code'], highest_cost['code'])
+        self.assertIn('$9,000', self.window.candidate_table.item(0, 4).text())
+        self.assertFalse(self.window.candidate_table.isSortingEnabled())
+
+    def test_all_data_headers_sort_the_complete_cache_in_both_directions(self):
+        self.window.port.setValue(1); self.window.symbol.setText('TEST')
+        for index in range(1, 25):
+            self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code=f'US.TEST-ALL-{index}',
+                strike=90-index*.5, snapshot_strike=90-index*.5))
+        self.window.top_count.setCurrentIndex(self.window.top_count.findData(5))
+        result = self.result(); result['input_dataset'] = self.dataset
+        self.window.display(result)
+        expected = [(1, 'symbol', 'asc'), (2, 'expiration', 'asc'), (3, 'days_to_expiry', 'asc'),
+                    (4, 'strike', 'asc'), (5, 'bid', 'desc'), (6, 'premium_per_contract_before_costs', 'desc'),
+                    (7, 'breakeven_before_costs', 'desc'), (8, 'daily_gross_return_pct', 'desc'),
+                    (9, 'annualized_gross_return_pct', 'desc'), (10, 'breakeven_buffer_pct', 'desc'),
+                    (11, 'earnings_date', 'asc'), (12, 'risk_score', 'asc'), (13, 'composite_score', 'desc')]
+        for column, metric, first_direction in expected:
+            for direction in (first_direction, 'desc' if first_direction == 'asc' else 'asc'):
+                with self.subTest(metric=metric, direction=direction):
+                    self.window.candidate_table.horizontalHeader().sectionClicked.emit(column)
+                    deadline = time.monotonic()+15
+                    while self.window.process is not None and time.monotonic() < deadline:
+                        self.app.processEvents(); time.sleep(.01)
+                    self.assertIsNone(self.window.process)
+                    report = self.window.results['put']['report']
+                    self.assertEqual(report['sort_order'][0], [metric, direction])
+                    self.assertEqual(report['qualified_count'], 25)
+                    self.assertEqual(report['collected_at'], self.dataset['collected_at'])
+                    self.assertEqual([c['code'] for c in report['recommendations']], report['ranked_codes'][:5])
+                    self.assertIn('↑' if direction == 'asc' else '↓',
+                                  self.window.candidate_table.horizontalHeaderItem(column).text())
+
+    def test_top_twenty_keeps_two_digit_rank_numbers_visible(self):
+        for index in range(1, 25):
+            self.dataset['contracts'].append(dict(self.dataset['contracts'][0], code=f'US.TEST-NUMBER-{index}',
+                strike=90-index*.5, snapshot_strike=90-index*.5))
+        self.window.top_count.setCurrentIndex(self.window.top_count.findData(20))
+        self.window.display(self.result())
+        table = self.window.candidate_table
+        self.window.show(); self.app.processEvents()
+        self.assertEqual([table.item(i, 0).text() for i in range(20)], [str(i) for i in range(1, 21)])
+        self.assertGreater(table.columnWidth(0), table.fontMetrics().horizontalAdvance('20')+24)
+        table.scrollToItem(table.item(19, 0)); self.app.processEvents()
+        self.assertTrue(table.viewport().rect().contains(table.visualItemRect(table.item(19, 0)).center()))
+
+    def test_earnings_unknown_and_crossing_stay_visible_without_changing_scores(self):
+        first = self.dataset['contracts'][0]
+        first['earnings'] = None
+        self.dataset['contracts'].append(dict(first, code='US.TEST-EVENT',
+            earnings=dict(date=first['expiration']), earnings_calendar_complete=True))
+        report = self.result()['report']
+        self.window.display(dict(action='put', symbol=first['symbol'],
+                                 collected_at=self.dataset['collected_at'], report=report))
+        for i, choice in enumerate(report['recommendations']):
+            event = self.window.candidate_table.item(i, 11).text()
+            if choice['code'] == first['code']: self.assertIn('未验证', event)
+            else: self.assertIn('到期前 / 同日', event)
+            self.assertEqual(self.window.candidate_table.item(i, 12).text(), f'{choice["risk_score"]:.2f}')
 
     def test_closed_port_runs_async_and_displays_error_instead_of_fake_results(self):
         with socket.socket() as reserved:
@@ -229,6 +344,24 @@ class ResearchUiTests(unittest.TestCase):
         self.assertTrue(self.window.trend_button.isEnabled())
         self.assertIn('分析未完成', self.window.trend_result.toPlainText())
         self.assertFalse(self.window.results)
+
+    def test_failed_put_refresh_clears_the_previous_candidate_list(self):
+        with socket.socket() as reserved:
+            reserved.bind(('127.0.0.1', 0))
+            self.window.port.setValue(reserved.getsockname()[1])
+            self.window.display(self.result())
+            self.assertEqual(self.window.candidate_table.rowCount(), 1)
+            self.window.start('put')
+            self.assertEqual(self.window.candidate_table.rowCount(), 0)
+            self.assertFalse(self.window.details_button.isEnabled())
+            deadline = time.monotonic()+15
+            while self.window.process is not None and time.monotonic() < deadline:
+                self.app.processEvents(); time.sleep(.01)
+        self.assertIsNone(self.window.process)
+        self.assertNotIn('put', self.window.results)
+        self.assertEqual(self.window.candidate_table.rowCount(), 0)
+        self.assertIn('分析未完成', self.window.put_result.toPlainText())
+        self.assertEqual(self.window.data_state.text(), '本次查询失败')
 
     def test_closing_stops_running_child_process(self):
         import sys

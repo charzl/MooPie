@@ -44,7 +44,7 @@ Python SDK 不包含 OpenD 登录状态；配置中不需要保存密码或验�
 | `schema` | 当前为整数1 |
 | `filters` | 按规则 ID 设置 `enabled` 布尔值和可选 `threshold` |
 | `trend_filters` | 按趋势规则 ID 设置子条件 |
-| `sort_order` | 按先后顺序比较，方向 `asc` / `desc`，指标不能重复 |
+| `sort_order` | 按先后顺序比较，方向 `asc` / `desc`，指标不能重复；支持 `symbol`、`expiration`、`earnings_date`，财报缺失日期始终排末尾 |
 | `scoring.weights` | 五个维度各0–100，至少一个大于0；按权重总和归一化 |
 | `scoring.parameters` | 指定已支持参数，其余继承默认尺度 |
 

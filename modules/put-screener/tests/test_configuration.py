@@ -46,6 +46,34 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(best['live_review_ready'])
         self.assertFalse(report['earnings_unverified_watchlist'])
 
+    def test_stock_and_expiration_sort_as_text_and_dates_in_both_directions(self):
+        self.dataset['contracts'] = [dict(self.row, code='US.'+name, symbol='US.'+name,
+            snapshot_symbol='US.'+name, expiration=expiry, snapshot_expiration=expiry)
+            for name, expiry in [('ZZZ', '2026-11-13'), ('AAA', '2026-11-20'), ('MMM', '2026-11-18')]]
+        original = copy.deepcopy(self.dataset)
+        for metric, ascending in [('symbol', ['US.AAA', 'US.MMM', 'US.ZZZ']),
+                                   ('expiration', ['US.ZZZ', 'US.MMM', 'US.AAA'])]:
+            for direction, expected in [('asc', ascending), ('desc', list(reversed(ascending)))]:
+                with self.subTest(metric=metric, direction=direction):
+                    report = rules.recommend(self.dataset, configuration=dict(sort_order=[[metric, direction]]), top_n=2)
+                    self.assertEqual(report['ranked_codes'], expected)
+                    self.assertEqual([c['code'] for c in report['recommendations']], expected[:2])
+        self.assertEqual(self.dataset, original)
+
+    def test_earnings_sort_keeps_missing_dates_last_and_retains_unknown_warnings(self):
+        self.dataset['contracts'] = [dict(self.row, code=code, earnings=event) for code, event in [
+            ('US.EARLY', dict(date='2026-11-01')), ('US.LATE', dict(date='2026-12-01')), ('US.UNKNOWN', None)]]
+        for direction, expected in [('asc', ['US.EARLY', 'US.LATE', 'US.UNKNOWN']),
+                                    ('desc', ['US.LATE', 'US.EARLY', 'US.UNKNOWN'])]:
+            report = rules.recommend(self.dataset, configuration=dict(sort_order=[['earnings_date', direction]]))
+            self.assertEqual(report['ranked_codes'], expected)
+            self.assertIn('财报日期或日历完整性未验证', report['ranked'][-1]['warnings'])
+        for row in self.dataset['contracts']: row['earnings'] = None
+        report = rules.scan(self.dataset, configuration=dict(sort_order=[['earnings_date', 'desc']]))
+        self.assertFalse(report['ranked'])
+        self.assertEqual([r['code'] for r in report['earnings_unverified_watchlist']],
+                         ['US.EARLY', 'US.LATE', 'US.UNKNOWN'])
+
     def test_disabled_trend_filter_can_keep_candidate_when_history_is_missing(self):
         self.dataset['daily_series'] = []
         self.assertFalse(rules.scan(self.dataset)['ranked'])

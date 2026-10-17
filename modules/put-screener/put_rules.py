@@ -16,8 +16,8 @@ import re
 from zoneinfo import ZoneInfo
 
 
-ENGINE_VERSION = '0.5.0'
-RULESET_VERSION = '4.1.0'
+ENGINE_VERSION = '0.6.0'
+RULESET_VERSION = '4.2.0'
 # Initial research thresholds, not calibrated probabilities or backtested signals.
 # These remain available as optional hard filters. Oversold is not a buy signal.
 TREND_RULES = [
@@ -96,7 +96,7 @@ TREND_METRICS = frozenset(('distance_to_ma50_pct', 'ma50_slope_5d_pct', 'breakdo
 EARNINGS_RULES = frozenset(('earnings-checked', 'earnings-buffer'))
 # Supported-contract boundaries, shown separately from optional strategy filters.
 REQUIRED_FILTERS = frozenset(('standard-contract', 'not-suspended'))
-SORTABLE_METRICS = METRICS - {'iv_pct', 'days_expiry_before_earnings', 'strike_below_20d_low_atr', 'expiration'}
+SORTABLE_METRICS = (METRICS - {'iv_pct', 'days_expiry_before_earnings', 'strike_below_20d_low_atr'}) | {'symbol', 'earnings_date'}
 # Illustrative basic boundaries, not a statement of any user's risk tolerance.
 # Preferences such as RSI, momentum, minimum OI and minimum Delta are not vetoes.
 RECOMMENDATION_BOUNDARIES = {
@@ -217,6 +217,21 @@ def configured_rules(source, options):
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+
+
+def sorted_candidates(rows, order):
+    """Stable numeric, ticker and ISO-date sorting; missing events always last."""
+    def value(row, metric):
+        if metric in ('symbol', 'expiration'): return row[metric]
+        if metric == 'earnings_date': return (row.get('earnings') or {}).get('date')
+        return finite(row['metrics'].get(metric), metric)
+    result = sorted(rows, key=lambda row: row['code'])
+    # Stable passes preserve lower-priority tie-breakers in either direction.
+    for metric, direction in reversed(order):
+        known = [row for row in result if value(row, metric) is not None]
+        missing = [row for row in result if value(row, metric) is None]
+        result = sorted(known, key=lambda row: value(row, metric), reverse=direction == 'desc') + missing
+    return result
 
 
 def finite(value, name):
@@ -568,16 +583,13 @@ def scan(dataset, budget=None, configuration=None):
                                     and values['snapshot_age_seconds'] <= LIVE_MAX_SNAPSHOT_AGE_SECONDS)))
         except (ValueError, TypeError, KeyError, OverflowError) as error:
             results.append(dict(base, status='invalid_data', eligible=False, live_review_ready=False, error=str(error)))
-    def sort_key(row):
-        return tuple((-1 if direction == 'desc' else 1) * finite(row['metrics'].get(metric), metric)
-                     for metric, direction in order) + (row['code'],)
-    ranked = sorted((row for row in results if row['eligible']), key=sort_key)
+    ranked = sorted_candidates((row for row in results if row['eligible']), order)
     for index, row in enumerate(ranked, 1): row['rank'] = index
     # Separate incomplete event checks from full eligibility. A KNOWN earnings
     # conflict is excluded; an UNKNOWN date can appear only on this watchlist.
-    watchlist = sorted((row for row in results if row['status'] == 'ok' and not row['eligible']
+    watchlist = sorted_candidates((row for row in results if row['status'] == 'ok' and not row['eligible']
                         and row['metrics']['earnings_known'] == 0
-                        and set(row['failed_rules']) <= EARNINGS_RULES), key=sort_key)
+                        and set(row['failed_rules']) <= EARNINGS_RULES), order)
     for index, row in enumerate(watchlist, 1): row['watchlist_rank'] = index
     valid = [row for row in results if row['status'] == 'ok']
     impacts = [dict(id=rid, excluded_count=sum(rid in row['failed_rules'] for row in valid),
@@ -634,8 +646,7 @@ def recommend(dataset, budget=None, configuration=None, top_n=10):
     ranked = report['ranked']
     views = {}
     for mode, order in RANKING_SORT_ORDERS.items():
-        ordered = sorted(ranked, key=lambda row: tuple((-1 if direction == 'desc' else 1)*row['metrics'][metric]
-                         for metric, direction in order) + (row['code'],))
+        ordered = sorted_candidates(ranked, order)
         views[mode] = [row['code'] for row in ordered[:top_n]]
         for index, row in enumerate(ordered, 1): row[mode + '_rank'] = index
     by_expiry = {}

@@ -1,16 +1,16 @@
-"""User-selected strategy filters and a separate lexicographic sort editor."""
+"""Filter boundaries and scoring parameters; sorting lives in the table header."""
 import copy
 from PySide6.QtCore import QDate
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
-    QWidget, QScrollArea, QCheckBox, QDoubleSpinBox, QComboBox, QPushButton,
+    QWidget, QScrollArea, QCheckBox, QDoubleSpinBox, QPushButton,
     QDialogButtonBox, QMessageBox, QDateEdit)
 
 from .research import load_rules
 from .research_explanation import METRICS, FLAGS, value_text
 
 
-class FilterSortDialog(QDialog):
+class FilterDialog(QDialog):
     def __init__(self, configuration, report=None, has_dataset=False, parent=None):
         super().__init__(parent)
         self.engine = load_rules()
@@ -18,15 +18,14 @@ class FilterSortDialog(QDialog):
         self.report = report
         self.has_dataset = has_dataset
         self.controls = {}
-        self.sort_controls = []
         self.score_controls = {}
         self.selected_configuration = None
-        self.setWindowTitle('Filter 过滤 / Sort 排序')
+        self.setWindowTitle('Filter / 评分设置')
         self.resize(880, 760)
         outer = QVBoxLayout(self)
         hint = QLabel('Filter 是不可越过的风险边界；Sort 比较边界内的收益。初始数值仅作研究示例，请按自己的承受范围调整。趋势和财报默认作为风险提示，可勾选升级为硬限制。')
         hint.setWordWrap(True); outer.addWidget(hint)
-        tabs = QTabWidget(); outer.addWidget(tabs, 1)
+        tabs = QTabWidget(); self.tabs = tabs; outer.addWidget(tabs, 1)
         page = QWidget(); filters = QVBoxLayout(page)
         actions = QHBoxLayout()
         clear = QPushButton('关闭全部可选 Filter'); clear.clicked.connect(self.disable_optional)
@@ -79,27 +78,6 @@ class FilterSortDialog(QDialog):
         filters.addStretch()
         scroll = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(page)
         tabs.addTab(scroll, 'Filter 过滤')
-        sorting = QWidget(); sort_layout = QVBoxLayout(sorting)
-        explanation = QLabel('依次比较第一、第二、第三排序；相同值才使用下一项。排序不会替你放宽任何 Filter。')
-        explanation.setWordWrap(True); sort_layout.addWidget(explanation)
-        preferred = ['daily_gross_return_pct', 'risk_score', 'composite_score', 'return_score',
-                     'annualized_gross_return_pct', 'gross_return_pct', 'spread_pct_of_mid', 'abs_delta',
-                     'otm_pct', 'breakeven_buffer_pct', 'cash_collateral', 'days_to_expiry',
-                     'premium_per_contract_before_costs']
-        order = self.initial['sort_order']
-        for index in range(3):
-            row = QHBoxLayout(); row.addWidget(QLabel(f'第 {index+1} 排序'))
-            metric = QComboBox(); direction = QComboBox()
-            if index: metric.addItem('不使用', None)
-            choices = list(dict.fromkeys(preferred + [item[0] for item in order]))
-            for key in choices: metric.addItem(METRICS.get(key, key), key)
-            direction.addItem('从高到低', 'desc'); direction.addItem('从低到高', 'asc')
-            if index < len(order):
-                metric.setCurrentIndex(metric.findData(order[index][0])); direction.setCurrentIndex(direction.findData(order[index][1]))
-            elif index: metric.setCurrentIndex(0)
-            row.addWidget(metric, 1); row.addWidget(direction); sort_layout.addLayout(row)
-            self.sort_controls.append((metric, direction))
-        sort_layout.addStretch(); tabs.addTab(sorting, 'Sort 排序')
         score_page = QWidget(); score_layout = QVBoxLayout(score_page)
         note = QLabel('风险分0–100，越高越危险；收益分和综合分越高越好。以下为待验证的研究参数，不代表亏损概率。权重自动归一化，缺失信息有单独惩罚。修改评分不更改 Filter 设置；启用最高风险分限制时，评分变化会影响是否通过。')
         note.setWordWrap(True); score_layout.addWidget(note)
@@ -149,8 +127,6 @@ class FilterSortDialog(QDialog):
             if isinstance(field, QDateEdit):
                 if check.isChecked(): result[group][rid]['threshold'] = field.date().toString('yyyy-MM-dd')
             elif field: result[group][rid]['threshold'] = field.value()
-        result['sort_order'] = [[metric.currentData(), direction.currentData()]
-                                for metric, direction in self.sort_controls if metric.currentData() is not None]
         for (group, key), field in self.score_controls.items(): result['scoring'][group][key] = field.value()
         return self.engine.resolve_configuration(result)
 
@@ -162,8 +138,7 @@ class FilterSortDialog(QDialog):
         try: self.selected_configuration = self.configuration()
         except ValueError as error:
             message = str(error)
-            if message.startswith('Invalid, duplicate'): message = '排序项不能重复，请把重复的后续项改为“不使用”。'
-            elif message.startswith('Minimum filter exceeds'): message = '最小值不能大于最大值，请检查到期天数或 Delta 范围。'
+            if message.startswith('Minimum filter exceeds'): message = '最小值不能大于最大值，请检查到期天数或 Delta 范围。'
             elif message.startswith('At least one risk'): message = '至少一项风险维度的权重需要大于0。'
             QMessageBox.warning(self, '设置无效', message); return
         self.accept()

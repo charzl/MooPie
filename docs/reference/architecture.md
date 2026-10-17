@@ -28,6 +28,7 @@ flowchart TD
 | 研究进程 JSON 边界 | [research_cli.py](../../apps/python/moopython/research_cli.py) | SDK 在子进程主线程；日志不污染结果 |
 | MCP 参数与协议 | [market_mcp.py](../../apps/python/moopython/market_mcp.py) | 薄适配层，共用采集；不实现策略或存储 |
 | 桌面展示与配置 | [research_ui.py](../../apps/python/moopython/research_ui.py)、[research_controls.py](../../apps/python/moopython/research_controls.py) | 传配置并展示引擎证据，不复制计算公式 |
+| 原生候选表格 | [research_table.py](../../apps/python/moopython/research_table.py) | 展示已排序的 Top N；表头请求完整缓存重算，不自行排序可见行 |
 | wheel 规则快照 | [setup.py](../../apps/python/setup.py) | 构建时复制独立规则，不手动维护第二份 |
 
 ## 规则加载与桌面进程

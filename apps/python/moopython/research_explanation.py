@@ -3,6 +3,9 @@ from collections import Counter
 from html import escape
 
 METRICS = {
+    'symbol': '股票代码', 'earnings_date': '财报列示日期',
+    'strike': '行权价', 'ask': 'Ask（每股美元）',
+    'breakeven_before_costs': '盈亏平衡价', 'breakeven_buffer_pct': '盈亏平衡缓冲',
     'standard_contract': '标准美股合约（每张 100 股）', 'not_suspended': '未停牌',
     'same_session_snapshot': '报价属于当前交易日', 'days_to_expiry': '剩余到期天数（自然日）',
     'otm_pct': '价外幅度', 'abs_delta': '|Delta|', 'bid': 'Bid（每股美元）',
@@ -86,9 +89,9 @@ def recommendations_html(report):
     return content
 
 
-def score_breakdown_html(choice):
+def score_breakdown_html(choice, heading='首选的评分依据'):
     scoring = choice['scoring']
-    content = '<h3>首选的评分依据</h3>'
+    content = '<h3>' + escape(heading) + '</h3>'
     content += table(['风险维度', '分数', '权重', '贡献分'],
         [[c['label'] + ('（信息缺失）' if not c['known'] else ''), f"{c['score']:.2f}",
           f"{c['weight_pct']:.1f}%", f"{c['contribution']:.2f}"] for c in scoring['components']])
@@ -142,5 +145,5 @@ def explanation_html(report):
     errors = Counter(row['error'] for row in report['results'] if row['status'] == 'invalid_data')
     if errors:
         content += '<h3>基础数据问题</h3>' + table(['原因', '合约数'], [[ERRORS.get(e, e), count] for e, count in errors.most_common()])
-    content += '<p>点「Filter / Sort 设置」调整条件和排序；导出 JSON 可查看原始数据、配置及每个合约的实际值、阈值和未通过项。</p>'
+    content += '<p>点「Filter / 评分设置」调整条件；点击候选表头排序。导出 JSON 可查看原始数据、配置及每个合约的实际值、阈值和未通过项。</p>'
     return content
