@@ -191,11 +191,14 @@ def describe_trend(evidence):
     ]
     if m['volume_ratio_20d'] is not None:
         reasons.append(f"成交量为此前 20 日均量的 {m['volume_ratio_20d']:.2f} 倍")
+    condition = ('若跌破前低、失守 MA50，且均线和 MACD 同时转弱，当前偏强判断需要下调。'
+                 if state == 'uptrend' else
+                 '站上 MA50、均线止跌且 MACD 动能改善时，趋势才有转强依据；跌破前低则下行压力增加。')
     return dict(heading=heading, horizon='未来 5–20 个交易日的条件判断', reasons=reasons,
         levels=[dict(label='此前 20 日低点（跌破后关注收复）' if m['breakdown_20d'] else '此前 20 日低点', value=m['prior_20d_low']),
                 dict(label='此前 60 日低点', value=m['prior_60d_low']),
                 dict(label='MA20', value=m['ma20']), dict(label='MA50', value=m['ma50'])],
-        change_condition='站上 MA50、均线止跌且 MACD 动能改善时，偏弱判断才有改善依据；跌破前低则下行压力增加。',
+        change_condition=condition,
         limitation='基于已完成日线，不覆盖盘中变化、新闻与估值，也不提供经过校准的涨跌概率。')
 
 
