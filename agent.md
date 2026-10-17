@@ -2,6 +2,17 @@
 
 目标：以最少步骤把仓库安装为可验证的行情工具。macOS 日常入口是 `./setup.sh` 和 `./moomoo`，Windows 为 `setup.ps1` 和 `moomoo.ps1`，人类使用说明见 [README.md](README.md)。
 
+按需阅读 [docs 导航](docs/README.md)，完整任务流程见 [Agent 工作流](docs/guides/agent-workflows.md)。先遵循本页约束，再只加载任务相关文档：
+
+| 当前任务 | 对应文档 |
+| --- | --- |
+| 安装、连接、第一次运行 | [安装](docs/getting-started/installation.md)、[快速上手](docs/getting-started/quickstart.md) |
+| Put / 趋势研究 | [Put 筛选](docs/guides/put-screening.md)、[趋势分析](docs/guides/trend-analysis.md) |
+| 配置宿主或调 MCP | [MCP 服务](docs/guides/mcp-server.md) |
+| 查参数、配置或返回字段 | [CLI](docs/reference/cli.md)、[配置](docs/reference/configuration.md)、[输出结构](docs/reference/output-schemas.md) |
+| 修改代码并交付 | [架构](docs/reference/architecture.md)、[测试](docs/guides/functional-testing.md)、[GitHub / CI](docs/guides/github-workflows.md) |
+| 排错或补文档 | [排查指南](docs/guides/troubleshooting.md)、[贡献规范与模板](docs/contributing/README.md) |
+
 ## 1. 先检查，不重复安装
 
 从实际仓库根目录检查：

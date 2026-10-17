@@ -1,5 +1,7 @@
 # 可复用抓取接口与 MCP
 
+文档入口见 [docs 导航](README.md)。实际接入步骤见 [MCP 指南](guides/mcp-server.md)，命令及返回约定见 [CLI 参考](reference/cli.md)和[输出结构](reference/output-schemas.md)。
+
 抓取代码在 `apps/python/moopython/market_collection.py`，命令行和 MCP 都调用 `MarketDataService`。规则引擎保留在独立的 `modules/put-screener/put_rules.py`。MCP 是调用适配层，数据库和策略都不写在 MCP 内。
 
 ```mermaid

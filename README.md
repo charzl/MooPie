@@ -4,6 +4,8 @@
 
 **首次使用：安装工具 → 在官方 OpenD 登录 → 检查连接 → 开始查询。** 给 agent 的完整操作指南见 [agent.md](agent.md)，自动发现入口为 [AGENTS.md](AGENTS.md)。
 
+完整文档见 [docs 导航](docs/README.md)：[快速上手](docs/getting-started/quickstart.md)、[Put 筛选](docs/guides/put-screening.md)、[趋势分析](docs/guides/trend-analysis.md)、[MCP 配置](docs/guides/mcp-server.md)、[故障排查](docs/guides/troubleshooting.md)。
+
 ## 1. 安装工具
 
 需要 Git 和 [uv](https://docs.astral.sh/uv/getting-started/installation/)。macOS 缺少 uv 时运行 `brew install uv`；Windows 用 `winget install --id=astral-sh.uv -e`，安装后重开终端。脚本会准备 Python **3.14**，无需自己激活虚拟环境。
@@ -182,6 +184,7 @@ macOS 也可从成功的 GitHub Actions 或 Releases 下载 `MooPie-macos-arm64`
 桌面、CLI 和 MCP 共用 Python 抓取服务；规则保留为独立文件。当前保存 JSON，数据库和旧数据清理后续再做。wheel 提供 `moomoo-options`、`moomoo-data`、`moomoo-mcp`、`moomoo-research`；安装 desktop extra 后还可运行 `moomoo-desktop`。根目录 `./moomoo` 是方便源码使用的统一入口。
 
 - [agent 安装、验证与排查](agent.md)
+- [任务指南、接口参考与贡献模板](docs/README.md)
 - [数据接口与架构](docs/market-data.md)
 - [独立 Put 规则](modules/put-screener/README.md)
 - [测试分层](tests/README.md)
