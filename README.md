@@ -1,8 +1,5 @@
 # MooPie · Moomoo 行情研究工具
-
-<img width="1518" height="1035" alt="Screenshot 2026-10-17 at 1 56 39 AM" src="https://github.com/user-attachments/assets/0723947a-bcf2-4a03-b73c-ed8bf816a654" />
-
-
+<img width="1904" height="1013" alt="Screenshot 2026-10-17 at 3 38 37 PM" src="https://github.com/user-attachments/assets/587832e3-da88-4842-9e55-8833c4acfb16" />
 
 
 
