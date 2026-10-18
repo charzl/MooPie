@@ -1,4 +1,4 @@
-"""Embed a pristine, pinned, publisher-signed GUI OpenD and the shared updater."""
+"""Copy OpenD metadata for the Python manager, optionally with a signed gateway."""
 import hashlib,json,pathlib,plistlib,shutil,subprocess,sys,tarfile,urllib.request,tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 META=json.loads((ROOT/'runtime/opend.json').read_text())
@@ -35,16 +35,10 @@ def prepare():
     run('codesign','--verify','--deep','--strict','-R','='+REQ,str(app))
     with (app/'Contents/Info.plist').open('rb') as f: info=plistlib.load(f)
     if info['CFBundleShortVersionString']!=META['version']: raise RuntimeError('OpenD version mismatch')
-    run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release')
-    binpath=pathlib.Path(run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release','--show-bin-path').strip())/'OpenDManager'
-    return app,binpath
+    return app
 def main():
     updater_only = '--updater-only' in sys.argv
-    if updater_only:
-        run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release')
-        helper=pathlib.Path(run('swift','build','--package-path',str(ROOT/'runtime'),'-c','release','--show-bin-path').strip())/'OpenDManager'
-        app=None
-    else: app,helper=prepare()
+    app=None if updater_only else prepare()
     arguments=[arg for arg in sys.argv[1:] if arg != '--updater-only']
     if not arguments: return
     dest=pathlib.Path(arguments[0])/'Contents/Resources/OpenD'
@@ -52,7 +46,7 @@ def main():
     if updater_only:
         if (dest/'moomoo_OpenD.app').exists(): shutil.rmtree(dest/'moomoo_OpenD.app')
     else: run('ditto',str(app),str(dest/'moomoo_OpenD.app'))
-    shutil.copy2(helper,dest/'OpenDManager'); shutil.copy2(ROOT/'runtime/opend.json',dest/'opend.json')
-    run('codesign','--force','--sign','-',str(dest/'OpenDManager'))
-    print('Embedded OpenD updater and metadata only; official OpenD is installed separately' if updater_only else f"Embedded official signed OpenD {META['version']}; signature retained")
+    (dest/'OpenDManager').unlink(missing_ok=True)  # Remove a stale helper when rebuilding an existing app.
+    shutil.copy2(ROOT/'runtime/opend.json',dest/'opend.json')
+    print('Copied OpenD metadata for the Python manager; official OpenD is installed separately' if updater_only else f"Embedded official signed OpenD {META['version']}; signature retained")
 if __name__=='__main__': main()

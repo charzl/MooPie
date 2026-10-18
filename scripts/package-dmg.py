@@ -23,7 +23,7 @@ def package(app,output,external_opend=False):
             run('codesign','--verify','--deep','--strict',str(installed))
             if external_opend:
                 if list(installed.rglob('moomoo_OpenD.app')): raise RuntimeError('Mounted lightweight installer contains OpenD')
-                run('codesign','--verify','--strict',str(installed/'Contents/Resources/OpenD/OpenDManager'))
+                run(str(installed/'Contents/MacOS'/installed.stem),'opend','--help')
                 updater_meta=json.loads((installed/'Contents/Resources/OpenD/opend.json').read_text())
                 if updater_meta != metadata['opend']: raise RuntimeError('OpenD download metadata mismatch')
             else: run('codesign','--verify','--deep','--strict','-R',REQ,str(installed/'Contents/Resources/OpenD/moomoo_OpenD.app'))

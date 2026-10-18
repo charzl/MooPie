@@ -75,6 +75,8 @@ uv --system-certs pip install --default-index https://pypi.org/simple \
 
 源码安装脚本安装工具依赖，不自动安装/登录 OpenD；打包 MooPie 有单独的官方 OpenD 管理器。需要人工登录时，明确报告这一具体阻塞，并继续完成不依赖账号的验证。
 
+OpenD管理器统一实现于 `apps/python/moopython/opend_manager.py`，打包应用用同一可执行文件的 `opend` 子命令，不额外编译管理程序。保留官方签名、架构和固定版本哈希验证、原子选择、回退及文件锁；复用已有 `MooClients/OpenD` 安装和旧selection.json，不退出用户已登录的OpenD。资源目录只放opend.json，图标生成使用Python/Qt。
+
 ## 4. 用 doctor 验证真实可用性
 
 ```sh

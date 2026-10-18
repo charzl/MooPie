@@ -6,10 +6,11 @@ import argparse,json,os,pathlib,plistlib,shutil,signal,subprocess,tempfile,time
 def main():
     parser=argparse.ArgumentParser(); parser.add_argument('app'); parser.add_argument('output'); args=parser.parse_args()
     app=pathlib.Path(args.app).resolve(); directory=app/'Contents/Resources/OpenD'
-    metadata=json.loads((directory/'opend.json').read_text()); gateway=directory/'moomoo_OpenD.app'; helper=directory/'OpenDManager'
+    metadata=json.loads((directory/'opend.json').read_text()); gateway=directory/'moomoo_OpenD.app'
+    helper=[str(app/'Contents/MacOS'/app.stem),'opend']
     external=app.stem == 'MooPie'
     if external and list(app.rglob('moomoo_OpenD.app')): raise RuntimeError('MooPie must not bundle OpenD')
-    command=[str(helper),'--metadata',str(directory/'opend.json')] if external else [str(helper),'--bundle',str(gateway),'--version',metadata['version']]
+    command=[*helper,'--metadata',str(directory/'opend.json')] if external else [*helper,'--bundle',str(gateway),'--version',metadata['version']]
     with tempfile.TemporaryDirectory(prefix='mooclients-opend-smoke-') as work:
         root=pathlib.Path(work)/'runtime'
         if external:
@@ -21,8 +22,8 @@ def main():
         state=json.loads((root/'selection.json').read_text()); assert state['current']==metadata['version']
         installed=root/'versions'/metadata['version']/'moomoo_OpenD.app'
         # Validate the copied executable as well; changing its publisher or version must fail.
-        subprocess.run([str(helper),'--bundle',str(installed),'--version',metadata['version'],'--root',str(root),'--verify'],check=True,timeout=60)
-        rejected=subprocess.run([str(helper),'--bundle',str(gateway),'--version','0.0.0','--root',str(root),'--verify'],capture_output=True,timeout=60)
+        subprocess.run([*helper,'--bundle',str(installed),'--version',metadata['version'],'--root',str(root),'--verify'],check=True,timeout=60)
+        rejected=subprocess.run([*helper,'--bundle',str(gateway),'--version','0.0.0','--root',str(root),'--verify'],capture_output=True,timeout=60)
         assert rejected.returncode!=0, 'Incorrect version accepted'
         binary=installed/'Contents/MacOS/moomoo_OpenD'
         with (pathlib.Path(work)/'opend.log').open('w') as log:
@@ -47,7 +48,7 @@ def main():
         shutil.copy2(binary,altered/'Contents/MacOS/moomoo_OpenD')
         info=plistlib.loads((installed/'Contents/Info.plist').read_bytes()); info['CFBundleName']='tampered'
         (altered/'Contents/Info.plist').write_bytes(plistlib.dumps(info))
-        tampered=subprocess.run([str(helper),'--bundle',str(altered),'--version',metadata['version'],'--root',str(root),'--verify'],capture_output=True,timeout=60)
+        tampered=subprocess.run([*helper,'--bundle',str(altered),'--version',metadata['version'],'--root',str(root),'--verify'],capture_output=True,timeout=60)
         assert tampered.returncode!=0, 'Tampered publisher-signed bundle accepted'
         result['tampered_signature_rejected']=True
     output=pathlib.Path(args.output); output.parent.mkdir(parents=True,exist_ok=True); output.write_text(json.dumps(result,indent=2)); print(json.dumps(result,indent=2))

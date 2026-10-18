@@ -3,6 +3,9 @@ import os
 import sys
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == 'opend':
+        from moopython.opend_manager import main as opend_main
+        return opend_main(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == 'paper':
         from moopython.paper_cli import main as paper_main
         return paper_main(sys.argv[2:])

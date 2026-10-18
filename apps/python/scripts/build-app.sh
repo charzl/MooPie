@@ -9,7 +9,7 @@ python3 -m PyInstaller --noconfirm --clean --windowed --name MooPie \
 python3 ../../scripts/smoke-paper.py dist/MooPie.app/Contents/MacOS/MooPie
 codesign --force --deep --sign - dist/MooPie.app
 python3 ../../scripts/bundle-opend.py --updater-only dist/MooPie.app
-# The installer contains only the client and small OpenD manager.
+# The Python application includes the manager; only download metadata is added.
 python3 ../../scripts/stamp-build.py dist/MooPie.app
 codesign --force --sign - dist/MooPie.app
 codesign --verify --deep --strict dist/MooPie.app

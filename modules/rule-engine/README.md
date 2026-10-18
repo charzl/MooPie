@@ -1,6 +1,6 @@
 # 独立行情规则引擎
 
-Python 包 `moomoo-rule-engine`，不依赖 Qt、Swift、OpenD SDK 或 AI SDK。输入标准化日线，输出可以让两个桌面客户端或 Codex 读取的 JSON。第一版只有确定性扫描；尚未接入真实 OpenD 数据、自动每日任务、新闻、模型调用或下单。
+Python 包 `moomoo-rule-engine`，不依赖 Qt、OpenD SDK 或 AI SDK。输入标准化日线，输出供桌面客户端或 agent 读取的 JSON。第一版只有确定性扫描；尚未接入真实 OpenD 数据、自动每日任务、新闻、模型调用或下单。
 
 仅支持当前最新稳定系列 Python 3.15，安装要求为 `>=3.15,<3.16`，不支持 Python 3.10 或其他旧版本。后续新稳定系列发布时再更新安装要求与 CI。
 

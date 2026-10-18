@@ -29,6 +29,7 @@ from moopython.security_directory import SecurityDirectory
 from moopython.paper_store import PaperStore, engine_hash
 from moopython.paper_engine import configuration
 from moopython.paper_strategies import STRATEGIES
+from moopython.opend_manager import parts
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -42,6 +43,7 @@ assert 'US.TEST' in signals_html({'US.TEST': signal})
 assert (DATABASE_ROOT/'schema.sql').read_text(encoding='utf-8') == schema_sql()
 assert Path(r.__file__).name == '_bundled_put_rules.py'
 assert len(engine_hash()) == 64 and len(STRATEGIES) == 6
+assert parts('10.11.7108') == (10,11,7108)
 assert len(analysis_revision()) == 64
 assert completed_session(datetime.fromisoformat('2026-10-19T15:00:00+00:00')) == '2026-10-16'
 assert configuration(['US.TEST'])['clients'][3]['strategy'] == 'buy_hold'

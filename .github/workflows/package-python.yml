@@ -94,7 +94,9 @@ jobs:
           moomoo-mcp --help
           python3 apps/python/main.py options --help
       - name: OpenD updater tests
-        run: swift test --package-path runtime
+        env:
+          PYTHONPATH: apps/python
+        run: python3 -m unittest discover -s apps/python/tests/unit -p test_opend_manager.py -v
       - name: Package application
         run: apps/python/scripts/build-app.sh
       - name: Validate lightweight app and independent OpenD installation

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p artifacts/AppIcon.iconset
-swift scripts/render-icon.swift artifacts/AppIcon.png
+python3 scripts/render-icon.py artifacts/AppIcon.png
 for SIZE in 16 32 128 256 512; do
  sips -z "$SIZE" "$SIZE" artifacts/AppIcon.png --out "artifacts/AppIcon.iconset/icon_${SIZE}x${SIZE}.png" >/dev/null
  DOUBLE=$((SIZE*2))

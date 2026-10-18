@@ -11,11 +11,11 @@ class LightweightPackagingTests(unittest.TestCase):
         bundle=module('bundle-opend')
         with tempfile.TemporaryDirectory() as work:
             root=pathlib.Path(work);(root/'runtime').mkdir();(root/'runtime/opend.json').write_text('{}')
-            binary=root/'bin';binary.mkdir();(binary/'OpenDManager').write_text('test helper')
             app=root/'MooPie.app';dest=app/'Contents/Resources/OpenD';(dest/'moomoo_OpenD.app').mkdir(parents=True)
-            with patch.object(bundle,'ROOT',root),patch.object(bundle,'prepare',side_effect=AssertionError('gateway download forbidden')),patch.object(bundle,'run',return_value=str(binary)),patch('sys.argv',['bundle-opend.py','--updater-only',str(app)]):
+            (dest/'OpenDManager').write_text('stale helper')
+            with patch.object(bundle,'ROOT',root),patch.object(bundle,'prepare',side_effect=AssertionError('gateway download forbidden')),patch.object(bundle,'run',side_effect=AssertionError('no compiler or subprocess required')),patch('sys.argv',['bundle-opend.py','--updater-only',str(app)]):
                 bundle.main()
-            self.assertFalse((dest/'moomoo_OpenD.app').exists());self.assertTrue((dest/'OpenDManager').is_file());self.assertTrue((dest/'opend.json').is_file())
+            self.assertFalse((dest/'moomoo_OpenD.app').exists());self.assertFalse((dest/'OpenDManager').exists());self.assertTrue((dest/'opend.json').is_file())
     def test_dmg_preflight_rejects_gateway_even_outside_expected_resource_path(self):
         package=module('package-dmg')
         with tempfile.TemporaryDirectory() as work:

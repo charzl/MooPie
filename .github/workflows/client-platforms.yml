@@ -57,7 +57,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: apps/python
           PYTHONUTF8: '1'
-        run: '& "${{ matrix.python }}" -m unittest discover -s apps/python/tests/integration -p test_research_ui.py -v'
+        run: |
+          & "${{ matrix.python }}" -m unittest discover -s apps/python/tests/integration -p test_research_ui.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "${{ matrix.python }}" -m unittest discover -s apps/python/tests/integration -p test_opend_runtime.py -v
       - name: Package and smoke-test Windows desktop
         if: runner.os == 'Windows'
         run: '& "${{ matrix.python }}" scripts/build-windows.py'
