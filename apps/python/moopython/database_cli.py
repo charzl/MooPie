@@ -15,6 +15,9 @@ def main(argv=None):
     commands.add_parser('status', help='Show database location, schema, history and retention policy')
     commands.add_parser('schema', help='Print SQL generated from migrations without opening the user database')
     commands.add_parser('watchlist', help='Read the persistent SQLite Watchlist')
+    signal_history = commands.add_parser('price-signals', help='Read saved support/resistance history for one stock')
+    signal_history.add_argument('symbol')
+    signal_history.add_argument('--limit', type=int, default=20)
     importing = commands.add_parser('import-watchlist', help='Validate a JSON and merge it into the SQLite Watchlist')
     importing.add_argument('path', type=Path)
     importing.add_argument('--replace', action='store_true', help='Replace existing membership after the full list validates')
@@ -58,6 +61,11 @@ def main(argv=None):
         elif args.command == 'search':
             from .security_directory import SecurityDirectory
             result = dict(query=args.query, candidates=SecurityDirectory(store).search(args.query, args.limit))
+        elif args.command == 'price-signals':
+            from .market_collection import us_symbols
+            from .price_signal_store import PriceSignalStore
+            code = us_symbols([args.symbol])[0]
+            result = dict(symbol=code, history=PriceSignalStore(store).history(code, args.limit))
         elif args.command == 'status': result = store.status()
         elif args.command == 'retention': result = store.set_retention(args.days)
         elif args.command == 'cleanup': result = store.cleanup(args.older_than_days, dry_run=args.dry_run)

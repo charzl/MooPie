@@ -4,6 +4,7 @@ QWidget {background:#101116;color:#e4e7ef;font-size:13px;font-family:"Noto Sans 
 QLabel#eyebrow {color:#8c9ab3;font-size:11px;font-weight:bold;}
 QLabel#title {font-size:27px;font-weight:bold;}
 QLabel#scopeHeading {font-size:20px;font-weight:bold;}
+QLabel#efficiencyValue {font-size:30px;font-weight:bold;}
 QLabel#muted {color:#949bad;font-size:12px;}
 QLineEdit,QSpinBox,QDoubleSpinBox,QComboBox {background:#1b1f28;border:1px solid #303542;border-radius:8px;padding:9px;}
 QComboBox {padding-left:12px;padding-right:38px;}

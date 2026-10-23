@@ -23,10 +23,17 @@ def number(value,name,minimum=0,strict=False):
     return float(value)
 
 
-def configuration(symbols,num_clients=6,trade_notional=10000,slippage_bps=5,fee_bps=1):
+def configuration(symbols,num_clients=6,trade_notional=10000,slippage_bps=5,fee_bps=1,
+                  initial_capital=500000,client_capitals=None,funding_mode='fixed'):
     if type(num_clients) is not int or not 6<=num_clients<=100: raise ValueError('Use 6–100 virtual clients, including QQQ and SPY benchmarks')
     if not symbols or len(set(symbols))!=len(symbols): raise ValueError('A nonempty unique universe is required')
     notional=number(trade_notional,'trade notional',strict=True)
+    capital=number(initial_capital,'initial capital',strict=True)
+    if funding_mode not in ('fixed','auto_deposit'): raise ValueError('Invalid paper funding mode')
+    overrides={} if client_capitals is None else client_capitals
+    ids={f'client-{i+1:03}' for i in range(num_clients)}
+    if not isinstance(overrides,dict) or set(overrides)-ids: raise ValueError('Client capitals must map existing client IDs to amounts')
+    overrides={key:number(value,'client initial capital',strict=True) for key,value in overrides.items()}
     slippage=number(slippage_bps,'slippage'); fee=number(fee_bps,'fee')
     if max(slippage,fee)>100: raise ValueError('Paper cost assumptions must be at most 100 bps per side')
     names=list(STRATEGIES)
@@ -34,12 +41,13 @@ def configuration(symbols,num_clients=6,trade_notional=10000,slippage_bps=5,fee_
     for i in range(num_clients):
         strategy=names[i%len(names)]; parameters=copy.deepcopy(STRATEGIES[strategy]['parameters'])
         benchmark=strategy in ('buy_qqq','buy_spy')
-        specs.append(dict(id=f'client-{i+1:03}',strategy=strategy,name=STRATEGIES[strategy]['name'],parameters=parameters,
+        identifier=f'client-{i+1:03}'; amount=overrides.get(identifier,capital)
+        specs.append(dict(id=identifier,strategy=strategy,name=STRATEGIES[strategy]['name'],parameters=parameters,
                           symbols=[parameters['symbol']] if benchmark else list(symbols),
-                          entry_notional=notional*len(symbols) if benchmark else notional))
+                          initial_capital=amount,entry_notional=amount if benchmark else notional))
     return dict(version=VERSION,symbols=list(symbols),market_symbols=list(dict.fromkeys([*symbols,'US.QQQ','US.SPY'])),
                 trade_notional=notional,slippage_bps=slippage,fee_bps=fee,
-                initial_capital=notional*len(symbols),clients=specs)
+                initial_capital=capital,funding_mode=funding_mode,clients=specs)
 
 
 def validate_inputs(payload,symbols,observed_at):
@@ -113,8 +121,9 @@ def initialize(payload,config,observed_at,mode='forward',start=None):
         generated=datetime.combine(date.fromisoformat(anchor),time(16,5),NY).isoformat()
     clients=[]
     for spec in config['clients']:
-        client=dict(copy.deepcopy(spec),cash=config['initial_capital'],contributions=config['initial_capital'],
-                    positions={},nav=config['initial_capital'],index=1.,peak=1.,max_drawdown=0.,
+        capital=number(spec['initial_capital'],'client initial capital',strict=True)
+        client=dict(copy.deepcopy(spec),cash=capital,contributions=capital,
+                    positions={},nav=capital,index=1.,peak=1.,max_drawdown=0.,
                     realized_pnl=0.,fees=0.,slippage=0.,closed_trades=0,wins=0,selection=[],pending=None)
         _decision(client,series,actions,anchor,generated)
         clients.append(client)
@@ -136,7 +145,7 @@ def advance(original,payload,observed_at):
         record_new=state['mode']=='backtest' or day==calendar[-1]
         if not record_new: state['skipped_decision_dates'].append(day)
         for client in state['clients']:
-            previous_nav=client['nav']; deposited=0.; events=[]
+            previous_nav=client['nav']; deposited=0.; events=[]; execution_events=[]
             for symbol,position in client['positions'].items():
                 for action in actions[symbol]:
                     if action['ex_div_date']!=day: continue
@@ -152,15 +161,24 @@ def advance(original,payload,observed_at):
             if pending and pending['as_of']<day and datetime.fromisoformat(pending['generated_at'])<open_at:
                 targets=set(pending['targets'])
                 for side,names in [('SELL',sorted(set(client['positions'])-targets)),('BUY',sorted(targets-set(client['positions'])))]:
-                    for symbol in names:
+                    for offset,symbol in enumerate(names):
                         base=maps[symbol][day]['open']; direction=1 if side=='BUY' else -1
                         price=base*(1+direction*config['slippage_bps']/10000)
                         budget=client.get('entry_notional',config['trade_notional'])
+                        if side=='BUY' and config['funding_mode']=='fixed':
+                            # Split scarce cash equally among new targets, including fees.
+                            available=max(0,client['cash'])/(len(names)-offset)/(1+config['fee_bps']/10000)
+                            if available<budget:
+                                execution_events.append(dict(symbol=symbol,reason='cash_limited',
+                                                             requested_notional=budget,allocated_notional=available))
+                            budget=min(budget,available)
                         quantity=floor(budget/price*1e6)/1e6 if side=='BUY' else client['positions'][symbol]['quantity']
+                        if side=='BUY' and quantity<=0 and config['funding_mode']=='fixed': continue
                         if quantity<=0: raise ValueError('Trade notional too small for fractional-share precision')
                         notional=quantity*price; fee=notional*config['fee_bps']/10000
                         if side=='BUY':
-                            flow=max(0,notional+fee-client['cash']); deposited+=flow
+                            flow=max(0,notional+fee-client['cash']) if config['funding_mode']=='auto_deposit' else 0.
+                            deposited+=flow
                             client['cash']+=flow-notional-fee; client['contributions']+=flow
                             client['positions'][symbol]=dict(quantity=quantity,cost=notional+fee,entry_date=day,income=0.)
                         else:
@@ -188,7 +206,8 @@ def advance(original,payload,observed_at):
                              drawdown_pct=client['max_drawdown']*100,exposure_pct=market_value/nav*100,
                              deposit=deposited,fees=client['fees'],slippage=client['slippage'],
                              realized_pnl=client['realized_pnl'],closed_trades=client['closed_trades'],wins=client['wins'],
-                             positions=copy.deepcopy(client['positions']),decision=plan,corporate_actions=events))
+                             positions=copy.deepcopy(client['positions']),decision=plan,corporate_actions=events,
+                             execution_events=execution_events))
         state['last_date']=day
     return state,rows,fills
 
@@ -211,6 +230,7 @@ def summarize(state,history,fills=()):
         trades=[f for f in fills if f['client_id']==client['id']]
         average_nav=sum(r['nav'] for r in by_client[client['id']])/len(by_client[client['id']]) if last else client['nav']
         output.append(dict(id=client['id'],strategy=client['strategy'],name=client.get('name',STRATEGIES[client['strategy']]['name']),
+                           initial_capital=client.get('initial_capital',state['config']['initial_capital']),
                            nav=client['nav'],cash=client['cash'],contributions=client['contributions'],
                            net_pnl=client['nav']-client['contributions'],return_pct=(client['index']-1)*100,
                            drawdown_pct=client['max_drawdown']*100,closed_trades=client['closed_trades'],

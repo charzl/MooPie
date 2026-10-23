@@ -53,6 +53,18 @@ CREATE TABLE paper_valuations (
     FOREIGN KEY (experiment_id,client_id) REFERENCES paper_clients(experiment_id,client_id)
 );
 
+CREATE TABLE price_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    as_of TEXT NOT NULL,
+    reference_price REAL NOT NULL CHECK (reference_price > 0),
+    reference_time TEXT NOT NULL,
+    signal_version TEXT NOT NULL,
+    calculated_at TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    UNIQUE (symbol, as_of, reference_time, signal_version)
+);
+
 CREATE TABLE securities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -100,6 +112,8 @@ CREATE INDEX paper_fills_experiment_date ON paper_fills(experiment_id,session_da
 
 CREATE INDEX paper_inputs_experiment ON paper_inputs(experiment_id,id);
 
+CREATE INDEX price_signals_latest ON price_signals(symbol, as_of DESC, calculated_at DESC);
+
 CREATE INDEX security_alias_lookup ON security_aliases(normalized_alias COLLATE NOCASE);
 
 CREATE INDEX security_name ON securities(normalized_name COLLATE NOCASE);
@@ -116,4 +130,4 @@ CREATE INDEX snapshot_retention ON snapshots(fetched_at);
 CREATE INDEX snapshot_symbol_time
     ON snapshots(symbol, operation, session_date, fetched_at DESC);
 
-PRAGMA user_version=5;
+PRAGMA user_version=6;

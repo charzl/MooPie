@@ -50,6 +50,9 @@ def main(argv=None):
             command.add_argument('--symbols',nargs='+',help='Defaults to the SQLite Watchlist; frozen at creation')
             command.add_argument('--clients',type=int,default=6)
             command.add_argument('--notional',type=float,default=10000)
+            command.add_argument('--initial-capital',type=float,default=500000,help='Starting USD per client (default: 500000)')
+            command.add_argument('--client-capitals',type=Path,help='JSON object mapping client IDs to starting USD overrides')
+            command.add_argument('--funding-mode',choices=('fixed','auto_deposit'),default='fixed',help='Fixed cash by default; auto_deposit explicitly permits additional funding')
             command.add_argument('--slippage-bps',type=float,default=5)
             command.add_argument('--fee-bps',type=float,default=1)
         if action in ('create','backtest','update','watch'):
@@ -79,7 +82,9 @@ def main(argv=None):
         if args.action in ('create','backtest'):
             from .watchlist import normalize_stock
             symbols=list(dict.fromkeys(normalize_stock(s) for s in args.symbols)) if args.symbols else WatchlistStore().symbols()
-            config=configuration(symbols,args.clients,args.notional,args.slippage_bps,args.fee_bps)
+            capitals=json.loads(args.client_capitals.read_text(encoding='utf-8')) if args.client_capitals else None
+            config=configuration(symbols,args.clients,args.notional,args.slippage_bps,args.fee_bps,
+                                 args.initial_capital,capitals,args.funding_mode)
             if args.action=='backtest':
                 date.fromisoformat(args.start)
                 if args.end:

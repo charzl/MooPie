@@ -5,12 +5,13 @@ from pathlib import Path
 import sys
 import tempfile
 
-from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, QTimer, Qt
-from PySide6.QtGui import QFontDatabase, QAction, QActionGroup
+from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, QTimer, Qt, QSize
+from PySide6.QtGui import QFontDatabase, QAction, QActionGroup, QColor, QPalette
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QFileDialog, QMessageBox,
     QDialog, QComboBox, QTabWidget, QFrame, QToolButton, QMenu, QListWidget,
-    QListWidgetItem, QWidgetAction, QSplitter)
+    QListWidgetItem, QWidgetAction, QSplitter, QStackedWidget, QTableWidget,
+    QTableWidgetItem, QAbstractItemView, QHeaderView, QStyledItemDelegate, QStyleOptionViewItem)
 
 from .market_collection import us_symbols
 from .runtime import OpenDRuntime
@@ -22,14 +23,27 @@ from .watchlist_store import WatchlistStore
 from .symbol_search import SymbolSuggestions
 from .watchlist_dialog import WatchlistDialog
 from .price_signal_view import signals_html
+from .security_directory import SecurityDirectory
+from .order_book import order_book_html
 from .desktop_preferences import DesktopPreferences
 from .paper_ui import PaperPanel
 from .desktop_widgets import SelectBox
+from .efficiency_dialog import EfficiencyDialog
 
 
 
 def esc(value):
     return html.escape(str(value))
+
+
+class WatchlistChangeDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        brush = index.data(Qt.ItemDataRole.ForegroundRole)
+        if brush:
+            option = QStyleOptionViewItem(option)
+            option.palette.setBrush(QPalette.ColorRole.Text, brush)
+            option.palette.setBrush(QPalette.ColorRole.HighlightedText, brush)
+        super().paint(painter, option, index)
 
 
 def trend_html(result):
@@ -56,6 +70,7 @@ class ResearchWindow(QMainWindow):
         self.process = None
         self.results = {}
         self.put_dataset = None
+        self.watchlist_quotes = {}
         self.watchlist = WatchlistStore()
         try:
             saved_config = self.settings.value('put_recommendation_configuration_v1', '')
@@ -86,7 +101,7 @@ class ResearchWindow(QMainWindow):
         for label, value in [('中文', 'zh'), ('English', 'en')]:
             action = language_menu.addAction(label); action.setCheckable(True)
             action.setChecked(self.ui.language == value); self.language_group.addAction(action)
-            action.triggered.connect(lambda checked=False, value=value: self.ui.set_language(value))
+            action.triggered.connect(lambda checked=False, value=value: self.change_language(value))
             self.language_actions[value] = action
         theme_menu = menu.addMenu('外观')
         self.theme_group = QActionGroup(self); self.theme_group.setExclusive(True)
@@ -94,7 +109,7 @@ class ResearchWindow(QMainWindow):
         for label, value in [('跟随系统', 'system'), ('深色', 'dark'), ('浅色', 'light')]:
             action = theme_menu.addAction(label); action.setCheckable(True)
             action.setChecked(self.ui.theme == value); self.theme_group.addAction(action)
-            action.triggered.connect(lambda checked=False, value=value: self.ui.set_theme(value))
+            action.triggered.connect(lambda checked=False, value=value: self.change_theme(value))
             self.theme_actions[value] = action
         connection_menu = menu.addMenu('OpenD 连接')
         for settings_menu in (menu,language_menu,theme_menu,connection_menu):
@@ -112,10 +127,14 @@ class ResearchWindow(QMainWindow):
         workspace = QHBoxLayout(self.analysis_page)
         workspace.setContentsMargins(0,6,0,0); workspace.setSpacing(16)
         self.scope_panel = QFrame(); self.scope_panel.setObjectName('scopePanel')
-        self.scope_panel.setFixedWidth(190)
+        self.scope_panel.setFixedWidth(280)
         scope_layout = QVBoxLayout(self.scope_panel); scope_layout.setContentsMargins(12,12,12,12)
         scope_layout.addWidget(QLabel('研究范围'))
+        self.home_button = QPushButton('首页 · Watchlist')
+        self.home_button.clicked.connect(self.search_watchlist)
+        scope_layout.addWidget(self.home_button)
         self.scope_list = QListWidget(); self.scope_list.setObjectName('scopeList')
+        self.scope_list.setItemDelegate(WatchlistChangeDelegate(self.scope_list))
         self.scope_list.itemClicked.connect(self.choose_scope)
         scope_layout.addWidget(self.scope_list,1)
         self.manage_button = QPushButton('管理 Watchlist'); self.manage_button.clicked.connect(self.manage_watchlist)
@@ -132,7 +151,7 @@ class ResearchWindow(QMainWindow):
         self.symbol = QLineEdit()
         self.symbol.setPlaceholderText('输入代码 / 公司名 / 别名，支持 * 和 ?；留空查看 Watchlist')
         self.symbol.setMinimumWidth(220)
-        self.symbol.returnPressed.connect(lambda: self.start('put'))
+        self.symbol.returnPressed.connect(lambda: self.start('put') if self.symbol.text().strip() else self.search_watchlist())
         controls.addWidget(self.symbol, 1)
         self.put_button = QPushButton('筛选卖出 Put'); self.put_button.setObjectName('primary')
         self.trend_button = QPushButton('分析走势')
@@ -144,10 +163,10 @@ class ResearchWindow(QMainWindow):
         self.ui.set_text(self.refresh_button, '更新行情', 'setText')
         self.refresh_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.ui.set_text(self.refresh_button, '增量更新：复用有效缓存，只抓缺失或过期股票。盘中缓存60秒；右侧菜单可强制刷新全部。', 'setToolTip')
-        self.refresh_button.clicked.connect(lambda: self.start('trend' if self.tabs.currentIndex() == 2 else 'put', update=True))
+        self.refresh_button.clicked.connect(lambda: self.refresh_current(update=True))
         refresh_menu = QMenu(self.refresh_button)
         self.force_refresh_action = QAction('强制刷新全部', refresh_menu)
-        self.force_refresh_action.triggered.connect(lambda: self.start('trend' if self.tabs.currentIndex() == 2 else 'put', refresh=True))
+        self.force_refresh_action.triggered.connect(lambda: self.refresh_current(refresh=True))
         refresh_menu.addAction(self.force_refresh_action)
         self.refresh_button.setMenu(refresh_menu)
         self.opend_button = QPushButton('启动 OpenD')
@@ -192,6 +211,10 @@ class ResearchWindow(QMainWindow):
         badge = QLabel('现金担保 PUT'); badge.setObjectName('badge'); card_header.addWidget(badge)
         card_header.addStretch()
         self.data_state = QLabel('等待查询'); self.data_state.setObjectName('dataState'); card_header.addWidget(self.data_state)
+        self.efficiency_button = QPushButton('持仓效率')
+        self.efficiency_button.setProperty('compact',True)
+        self.efficiency_button.clicked.connect(self.show_efficiency)
+        card_header.addWidget(self.efficiency_button)
         self.watchlist_button = QToolButton()
         self.watchlist_button.setProperty('menuOnly', True)
         self.watchlist_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -244,22 +267,45 @@ class ResearchWindow(QMainWindow):
         card.addLayout(list_footer)
         self.put_result = QTextBrowser(); self.trend_result = QTextBrowser()
         self.price_signal_result = QTextBrowser()
-        for panel in (self.put_result, self.trend_result, self.price_signal_result):
+        self.order_book_result = QTextBrowser()
+        for panel in (self.put_result, self.trend_result, self.price_signal_result, self.order_book_result):
             panel.setOpenExternalLinks(False)
         self.tabs.addTab(self.ranking_card, '推荐与候选')
         self.tabs.addTab(self.put_result, '合约详情 / 筛选依据')
         technical_page = QWidget(); technical_layout = QVBoxLayout(technical_page)
-        technical_header = QHBoxLayout(); technical_header.addWidget(QLabel('已完成日线 · 趋势、支撑压力与价格位置'))
+        technical_header = QHBoxLayout(); technical_header.addWidget(QLabel('个股依据 · 支撑阻力、买卖盘与趋势'))
         technical_header.addStretch(); technical_header.addWidget(self.trend_button)
         technical_layout.addLayout(technical_header)
         technical_content = QSplitter(Qt.Orientation.Vertical)
-        technical_content.addWidget(self.trend_result); technical_content.addWidget(self.price_signal_result)
-        technical_content.setStretchFactor(0,1); technical_content.setStretchFactor(1,1)
+        price_and_depth = QSplitter(Qt.Orientation.Horizontal)
+        price_and_depth.addWidget(self.price_signal_result)
+        price_and_depth.addWidget(self.order_book_result)
+        price_and_depth.setStretchFactor(0,1); price_and_depth.setStretchFactor(1,1)
+        technical_content.addWidget(price_and_depth)
+        technical_content.addWidget(self.trend_result)
+        technical_content.setStretchFactor(0,2); technical_content.setStretchFactor(1,1)
         technical_layout.addWidget(technical_content,1)
         self.tabs.addTab(technical_page, '技术面依据')
         self.paper_panel = PaperPanel(self)
         self.main_tabs.addTab(self.paper_panel, '模拟盘')
-        layout.addWidget(self.tabs, 1)
+        self.overview_page = QWidget()
+        overview_layout = QVBoxLayout(self.overview_page)
+        overview_layout.addWidget(QLabel('Watchlist · 股价和涨跌'))
+        self.overview_note = QLabel('正在读取价格…')
+        self.overview_note.setObjectName('muted'); self.overview_note.setWordWrap(True)
+        overview_layout.addWidget(self.overview_note)
+        self.overview_table = QTableWidget(0, 3)
+        self.overview_table.setHorizontalHeaderLabels(['股票', '股价', '涨跌'])
+        self.overview_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.overview_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.overview_table.verticalHeader().setVisible(False)
+        self.overview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.overview_table.cellClicked.connect(self.open_overview_row)
+        overview_layout.addWidget(self.overview_table, 1)
+        self.analysis_stack = QStackedWidget()
+        self.analysis_stack.addWidget(self.overview_page)
+        self.analysis_stack.addWidget(self.tabs)
+        layout.addWidget(self.analysis_stack, 1)
         self.reset_panels()
         self.symbol.textChanged.connect(self.reset_panels)
         footer = QHBoxLayout()
@@ -280,24 +326,63 @@ class ResearchWindow(QMainWindow):
     def initial_watchlist(self):
         self.symbol.clear()
         self.main_tabs.setCurrentIndex(0)
-        self.tabs.setCurrentIndex(0)
-        self.start('put')
+        self.analysis_stack.setCurrentIndex(0)
+        self.start('overview')
 
     def favorite_status(self, message):
         if self.process is None: self.ui.set_text(self.status,message)
+
+    def refresh_current(self, *, update=False, refresh=False):
+        action = 'overview' if self.analysis_stack.currentIndex() == 0 else 'trend' if self.tabs.currentIndex() == 2 else 'put'
+        self.start(action, update=update, refresh=refresh, depth=action == 'trend' and bool(self.symbol.text().strip()))
+
+    def change_language(self, value):
+        self.ui.set_language(value)
+        self.update_watchlist_label()
+
+    def change_theme(self, value):
+        self.ui.set_theme(value)
+        self.update_watchlist_label()
+        for index, row in enumerate(self.results.get('overview', {}).get('rows', [])):
+            color = self.change_color(row.get('change_pct'))
+            for column in (1, 2):
+                item = self.overview_table.item(index, column)
+                if item and color: item.setForeground(color)
+
+    def change_color(self, change):
+        if change is None or change == 0: return None
+        if self.ui.effective_theme == 'dark': return QColor('#48d67f' if change > 0 else '#ff7777')
+        return QColor('#167a3e' if change > 0 else '#bd3030')
+
+    def open_stock(self, code):
+        if self.process is not None: return
+        self.symbol.setText(code.removeprefix('US.'))
+        self.analysis_stack.setCurrentIndex(1)
+        self.start('trend', depth=True)
+
+    def open_overview_row(self, row, _column):
+        item = self.overview_table.item(row, 0)
+        if item: self.open_stock(item.data(Qt.ItemDataRole.UserRole))
 
     def choose_scope(self, item):
         if self.process is not None: return
         code = item.data(Qt.ItemDataRole.UserRole)
         if code:
-            self.symbol.setText(code.removeprefix('US.'))
-            self.start('put')
+            self.open_stock(code)
         else: self.search_watchlist()
 
     def open_first_choice(self):
         if not self.results.get('put',{}).get('report',{}).get('recommendations'): return
         self.candidate_table.selectRow(0)
         self.tabs.setCurrentIndex(1)
+
+    def show_efficiency(self):
+        report=self.results.get('put',{}).get('report',{})
+        choices=report.get('recommendations',[])
+        index=self.candidate_table.currentRow()
+        code=choices[index]['code'] if 0<=index<len(choices) else None
+        row=next((row for row in report.get('ranked',[]) if row['code']==code),None)
+        EfficiencyDialog(self,row=row,session_date=report.get('session_date')).exec()
 
     def show_first_choice(self, report=None):
         choices=(report or {}).get('recommendations',[])
@@ -314,7 +399,9 @@ class ResearchWindow(QMainWindow):
 
     def update_watchlist_label(self):
         try:
-            count = len(self.watchlist.symbols())
+            symbols = self.watchlist.symbols()
+            count = len(symbols)
+            names = SecurityDirectory().lookup(symbols)
             self.symbol_search.refresh_membership()
             self.ui.set_text(self.watchlist_button, f'Watchlist ({count})', 'setText')
             self.ui.set_text(self.view_watchlist_action, f'查看 Watchlist ({count})', 'setText')
@@ -322,8 +409,18 @@ class ResearchWindow(QMainWindow):
             self.scope_list.clear()
             all_item=QListWidgetItem('全部 Watchlist'); self.scope_list.addItem(all_item)
             selected=0 if not current else -1
-            for code in self.watchlist.symbols():
-                item=QListWidgetItem(code.removeprefix('US.')); item.setData(Qt.ItemDataRole.UserRole,code)
+            for code in symbols:
+                quote = self.watchlist_quotes.get(code, {})
+                name = quote.get('name') or names.get(code, {}).get('name') or code.removeprefix('US.')
+                price = f'${quote["price"]:,.2f}' if quote.get('price') is not None else '—'
+                change = quote.get('change_pct')
+                change_label = f'{change:+.2f}%' if change is not None else '—'
+                item=QListWidgetItem(f'{name}\n{price}   {change_label}')
+                item.setData(Qt.ItemDataRole.UserRole,code)
+                item.setToolTip(f'{code} · 报价时间（纽约）：{quote.get("update_time") or "未提供"}')
+                color = self.change_color(change)
+                if color: item.setForeground(color)
+                item.setSizeHint(QSize(0, max(64, self.scope_list.fontMetrics().lineSpacing()*2+20)))
                 self.scope_list.addItem(item)
                 if code.removeprefix('US.')==current: selected=self.scope_list.count()-1
             self.scope_list.setCurrentRow(selected)
@@ -335,10 +432,10 @@ class ResearchWindow(QMainWindow):
 
     def search_watchlist(self):
         if self.process is not None: return
-        action = 'trend' if self.tabs.currentIndex() == 2 else 'put'
         self.symbol.clear()
         self.update_watchlist_label()
-        self.start(action)
+        self.analysis_stack.setCurrentIndex(0)
+        self.start('overview')
 
     def manage_watchlist(self):
         if self.process is not None: return
@@ -357,6 +454,7 @@ class ResearchWindow(QMainWindow):
         self.put_dataset = None
         self.ui.set_text(self.scope_heading,'分析 · '+(self.symbol.text().strip().upper() or 'Watchlist'))
         self.ui.set_text(self.price_signal_result, signals_html({}), 'setHtml')
+        self.ui.set_text(self.order_book_result, order_book_html(None), 'setHtml')
         self.clear_candidates('输入代码搜索单股，或留空查看默认 Watchlist。')
         self.ui.set_text(self.put_result, f'<h2>卖出 Put · Top {self.top_count.currentData()}</h2><p>先按 Filter 过滤，再按到期时长、担保成本、收益、风险或综合得分排序。</p><p style="color:#9aaab7">点击表头切换排序方向；设置页调整 Filter 和评分参数。</p>', 'setHtml')
         self.ui.set_text(self.trend_result, '<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>', 'setHtml')
@@ -375,14 +473,14 @@ class ResearchWindow(QMainWindow):
 
     def busy(self, value):
         if value: self.symbol_search.dismiss()
-        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.refresh_button, self.opend_button, self.watchlist_button, self.view_watchlist_action, self.add_watchlist_action, self.manage_watchlist_action, self.manage_button, self.scope_list, self.directory_action, self.rules_button, self.top_count, self.candidate_table): control.setEnabled(not value)
+        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.refresh_button, self.opend_button, self.watchlist_button, self.view_watchlist_action, self.add_watchlist_action, self.manage_watchlist_action, self.manage_button, self.home_button, self.scope_list, self.directory_action, self.rules_button, self.top_count, self.candidate_table, self.overview_table): control.setEnabled(not value)
         self.cancel_button.setVisible(value)
 
-    def start(self, action, reuse=False, refresh=False, update=False):
+    def start(self, action, reuse=False, refresh=False, update=False, depth=False):
         if self.process is not None: return
         text = self.symbol.text().strip()
         try:
-            code = None if action == 'sync-directory' else self.symbol_search.query_code()
+            code = None if action in ('sync-directory', 'overview') else self.symbol_search.query_code()
             if action == 'add' and code is None: raise ValueError('请先输入要加入 Watchlist 的股票代码。')
         except ValueError as error:
             self.ui.set_text(self.status, str(error), 'setText'); return
@@ -390,22 +488,27 @@ class ResearchWindow(QMainWindow):
         if reuse and dataset is None:
             self.ui.set_text(self.status, '没有可复用的数据，请先抓取。', 'setText'); return
         if action == 'put' and not reuse: self.put_dataset = None
-        if action in ('put','trend'): self.main_tabs.setCurrentIndex(0)
+        if action in ('overview','put','trend'): self.main_tabs.setCurrentIndex(0)
+        if action == 'overview': self.analysis_stack.setCurrentIndex(0)
+        elif action in ('put','trend'): self.analysis_stack.setCurrentIndex(1)
         if code: self.settings.setValue('symbol', code.removeprefix('US.'))
         self.action = action
         self.cancelled = False
         self.results.pop(action, None)
         if action == 'put':
             self.clear_candidates('正在用已有数据重新过滤和排序…' if reuse else '正在读取已保存的收盘结果…' if not(refresh or update) else '正在按交易时段读取行情并筛选合约…')
-        if action not in ('add', 'sync-directory'): self.tabs.setCurrentIndex(0 if action == 'put' else 2)
+        if action in ('put','trend'): self.tabs.setCurrentIndex(0 if action == 'put' else 2)
         if action in ('put', 'trend'): self.ui.set_text(self.price_signal_result, '正在分析价格信号…', 'setPlainText')
         self.export_button.setEnabled(bool(self.results))
-        if action not in ('add', 'sync-directory'): self.ui.set_text(self.panel(action), f'<h2>{esc(code or "Watchlist")}</h2><p>正在抓取和分析…</p>', 'setHtml')
+        if action in ('put','trend'): self.ui.set_text(self.panel(action), f'<h2>{esc(code or "Watchlist")}</h2><p>正在抓取和分析…</p>', 'setHtml')
+        if action == 'overview': self.ui.set_text(self.overview_note, '正在读取 Watchlist 的价格和基本信息…', 'setText')
+        if action == 'trend': self.ui.set_text(self.order_book_result, '正在读取买卖盘…' if depth else '点击左侧股票查看盘口。', 'setPlainText')
         self.ui.set_text(self.status, '正在用已采集的数据重新过滤和排序，不重新抓取行情。' if reuse else
                             '正在刷新 OpenD 并保存数据库…' if refresh else '正在读取已保存的收盘结果；首次查询新股票时自动抓取…', 'setText')
         if action == 'add': self.ui.set_text(self.status, '正在核验证券基本资料并加入 Watchlist…', 'setText')
         if update: self.ui.set_text(self.status, '正在逐股检查缓存，只补抓缺失或过期股票，再合并 Top 20…', 'setText')
         if action == 'sync-directory': self.ui.set_text(self.status, '正在更新股票和 ETF 目录；不抓取期权或股票报价…', 'setText')
+        if action == 'overview': self.ui.set_text(self.status, '正在读取 Watchlist 股票价格和基本信息…', 'setText')
         self.output.clear(); self.errors.clear()
         self.result_path.unlink(missing_ok=True)
         process = QProcess(self); self.process = process
@@ -420,7 +523,9 @@ class ResearchWindow(QMainWindow):
         extra = []
         if refresh: extra.append('--refresh')
         if update: extra.append('--update')
-        if action in ('put','trend') and not(refresh or update or reuse): extra.append('--saved')
+        if depth: extra.append('--depth')
+        if depth and not(refresh or update): extra.append('--update')
+        if action in ('put','trend') and not(refresh or update or reuse or depth): extra.append('--saved')
         if action == 'add': extra.append('--refresh')
         if action == 'put':
             config_path = Path(self.workspace.name) / 'configuration.json'
@@ -461,8 +566,10 @@ class ResearchWindow(QMainWindow):
                 self.release_process()
                 return
             if self.action == 'put': self.clear_candidates('本次分析已取消，没有生成候选。')
+            if self.action == 'overview': self.ui.set_text(self.overview_note, '本次价格更新已取消。', 'setText')
             self.ui.set_text(self.price_signal_result, '本次分析已取消，未生成价格信号。', 'setPlainText')
-            self.ui.set_text(self.panel(self.action), '本次分析已取消。可以重新输入股票并开始查询。', 'setPlainText')
+            if self.action in ('put','trend'):
+                self.ui.set_text(self.panel(self.action), '本次分析已取消。可以重新输入股票并开始查询。', 'setPlainText')
             self.ui.set_text(self.status, '已取消；没有生成本次分析结果。', 'setText')
             self.release_process()
             return
@@ -495,6 +602,11 @@ class ResearchWindow(QMainWindow):
             self.ui.set_text(self.status, ('股票目录更新失败，保留原目录：' if self.action == 'sync-directory' else '未加入 Watchlist：') + message, 'setText')
             return
         self.results.pop(self.action, None)
+        if self.action == 'overview':
+            self.overview_table.setRowCount(0)
+            self.ui.set_text(self.overview_note, '首页价格暂不可用：' + message, 'setText')
+            self.ui.set_text(self.status, '首页价格未完成；请检查 OpenD 和行情权限。', 'setText')
+            return
         self.ui.set_text(self.price_signal_result, '本次查询未完成，未生成价格信号。', 'setPlainText')
         if self.action == 'put':
             self.clear_candidates('查询失败：' + message)
@@ -503,16 +615,62 @@ class ResearchWindow(QMainWindow):
         self.ui.set_text(self.panel(self.action), '分析未完成\n\n' + message + '\n\n没有缓存时会自动请求 OpenD。请确认 OpenD 已登录，并检查端口、股票代码和行情权限。', 'setPlainText')
         self.ui.set_text(self.status, '分析未完成；没有生成候选或走势结论。', 'setText')
 
+    def display_overview(self, result):
+        self.results['overview'] = result
+        self.watchlist_quotes = {row['symbol']: row for row in result.get('rows', [])}
+        self.update_watchlist_label()
+        self.analysis_stack.setCurrentIndex(0)
+        rows = result.get('rows', [])
+        self.overview_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            change = row.get('change_pct')
+            values = [row['name'], f'${row["price"]:,.2f}' if row.get('price') is not None else '—',
+                      f'{change:+.2f}%' if change is not None else '—']
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0: item.setData(Qt.ItemDataRole.UserRole, row['symbol'])
+                item.setToolTip(f'{row["symbol"]} · 报价时间（纽约）：{row.get("update_time") or "未提供"}')
+                color = self.change_color(change)
+                if column in (1, 2) and color: item.setForeground(color)
+                self.overview_table.setItem(index, column, item)
+        self.ui.localize_table(self.overview_table)
+        self.ui.set_text(self.overview_note,
+            f'{len(rows)} 只股票 · 报价采集 {result.get("collected_at") or "时间未提供"}（UTC）。悬停查看各股报价时间；点击股票查看支撑阻力与买卖盘。', 'setText')
+        self.ui.set_text(self.status, '首页已显示股价和涨跌；点击一只股票查看详细价位。', 'setText')
+        self.export_button.setEnabled(True)
+
     def display(self, result):
         action = result['action']
+        if action == 'overview':
+            self.display_overview(result)
+            return
+        signals = dict(result.get('price_signals', {}))
         self.update_watchlist_label()
         self.ui.set_text(self.scope_heading,'分析 · '+result['symbol'].removeprefix('US.'))
         self.results[action] = result
-        self.ui.set_text(self.price_signal_result, signals_html(result.get('price_signals', {})), 'setHtml')
+        signal_view = signals_html(signals)
+        if result.get('price_signal_saved_at'):
+            signal_view += '<p>支撑阻力已保存到 SQLite · 计算时间 ' + esc(result['price_signal_saved_at']) + '（UTC）</p>'
+        if result.get('saved_price_signal'):
+            saved = result['saved_price_signal']
+            signal_view += ('<hr><h3>上次保存的历史价位</h3><p>当前分析不可用；以下结果按当时的参考价与日线计算，可能已经过时。保存时间 '
+                            + esc(saved['calculated_at']) + '（UTC）</p>'
+                            + signals_html({saved['signal']['symbol']: saved['signal']}))
+        if result.get('price_signal_storage_error'):
+            signal_view += '<p>支撑阻力未能写入 SQLite：' + esc(result['price_signal_storage_error']) + '</p>'
+        self.ui.set_text(self.price_signal_result, signal_view, 'setHtml')
+        self.ui.set_text(self.order_book_result, order_book_html(result.get('order_book')), 'setHtml')
         heading = f'<h2>{esc(result["symbol"])} · {"卖出 Put" if action == "put" else "走势"}</h2>'
         if action == 'trend':
             content = (''.join('<h2>' + esc(item['symbol']) + '</h2>' + trend_html(item) for item in result['items'])
-                       if 'items' in result else trend_html(result))
+                       if 'items' in result else trend_html(result) if result.get('trend', {}).get('status') == 'ok'
+                       else '<p>日线分析不可用：' + esc(result.get('trend', {}).get('error', '数据不足')) + '</p>')
+            quote = result.get('quote')
+            if quote:
+                content = (f'<p>最新价 ${quote["last_price"]:,.2f} · 报价时间 {esc(quote.get("update_time") or "未提供")}（纽约）</p>'
+                           + content)
+            if result.get('quote_error'):
+                content += '<p>最新报价未取得：' + esc(result['quote_error']) + '</p>'
             content += ''.join('<p>查询失败：' + esc(item['symbol']) + ' · ' + esc(item['error']) + '</p>' for item in result.get('collection_errors', []))
         else:
             report = result['report']; ranked = report['ranked']

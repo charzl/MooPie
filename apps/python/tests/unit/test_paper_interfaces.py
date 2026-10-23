@@ -67,9 +67,15 @@ class PaperInterfaceTests(unittest.TestCase):
             path=Path(root); data=fixture(); file=path/'input.json'; file.write_text(json.dumps(data))
             output=path/'result.json'; env=dict(os.environ,MOOMOO_DB_PATH=str(path/'ledger.sqlite3'),PYTHONPATH=str(ROOT/'apps/python'))
             command=[sys.executable,str(ROOT/'apps/python/main.py'),'paper']
-            run=subprocess.run(command+['backtest','--symbols','TEST','--input',str(file),'--start',data['daily_series'][0]['bars'][254]['date'],'--output',str(output)],env=env,capture_output=True,timeout=30)
+            capitals=path/'capitals.json'; capitals.write_text(json.dumps({'client-005':750000}))
+            run=subprocess.run(command+['backtest','--symbols','TEST','--input',str(file),'--start',data['daily_series'][0]['bars'][254]['date'],
+                '--initial-capital','500000','--client-capitals',str(capitals),'--output',str(output)],env=env,capture_output=True,timeout=30)
             self.assertEqual(run.returncode,0,run.stderr.decode())
             report=json.loads(output.read_text()); self.assertTrue(report['fills'])
+            self.assertEqual(report['config']['funding_mode'],'fixed')
+            self.assertEqual(report['clients'][0]['initial_capital'],500000)
+            self.assertEqual(report['clients'][4]['initial_capital'],750000)
+            self.assertTrue(all(r['deposit']==0 for r in report['history'][6:]))
             run=subprocess.run(command+['update',str(report['id']),'--input',str(file),'--output',str(output)],env=env,capture_output=True,timeout=30)
             self.assertEqual(run.returncode,1)
             self.assertIn('Historical experiments are fixed',json.loads(output.read_text())['error'])

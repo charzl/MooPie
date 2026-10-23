@@ -50,6 +50,13 @@ class PriceSignalTests(unittest.TestCase):
         self.assertIn('确认承接',result['summary'])
         self.assertIn('不是开仓依据',result['next_check'])
 
+    def test_support_centers_are_below_and_resistance_centers_above_reference(self):
+        series, trend = self.fixture()
+        for price in (159, 161, 209, 211):
+            result = price_position(series,trend,reference=dict(price=price,time='synthetic',basis='underlying_snapshot'))
+            self.assertTrue(all(zone['center'] < price for zone in result['support_zones']))
+            self.assertTrue(all(zone['center'] > price for zone in result['resistance_zones']))
+
     def test_missing_invalid_or_inconsistent_history_remains_unknown(self):
         series, trend = self.fixture()
         invalid = dict(trend,status='invalid_data',error='history missing')

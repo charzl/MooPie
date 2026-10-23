@@ -1,5 +1,5 @@
 """Research-inspired, long-only equity strategies; independent of Put scoring."""
-VERSION='1.1.0'
+VERSION='1.2.0'
 STRATEGIES={
     'trend_200d':dict(name='200日趋势',parameters=dict(period=200),
                     source='https://doi.org/10.3905/jwm.2007.674809'),

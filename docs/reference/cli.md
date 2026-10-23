@@ -11,7 +11,7 @@
 | `collect SYMBOL...` | `--months 3`、`--enrich INPUT`、`--output PATH`（必需）、`--port`、`--refresh` | 原始 JSON 文件；stdout 是保存摘要 |
 | `analyze INPUT` | `--output PATH`（必需）、`--config PATH`、`--budget USD`、`--top N`、`--rank-by`、`--csv-output PATH`、`--scan-only` | 分析 JSON、可选 CSV；stdout 是摘要 |
 | `mcp` | `--host`、`--port` | stdio 协议，等待宿主输入 |
-| `db` | `status`、`schema`、`watchlist`、`import-watchlist PATH`、`export-watchlist PATH`、`search QUERY [--limit N]`、`sync-symbols [--port N]`、`retention --days N`、`cleanup --older-than-days N [--dry-run]`、`vacuum` | 状态 / 本地股票候选 / 同步 / 清理 JSON；`schema` 输出 SQL；`sync-symbols` 和显式导入验证可连接 OpenD |
+| `db` | `status`、`schema`、`watchlist`、`price-signals SYMBOL [--limit N]`、`import-watchlist PATH`、`export-watchlist PATH`、`search QUERY [--limit N]`、`sync-symbols [--port N]`、`retention --days N`、`cleanup --older-than-days N [--dry-run]`、`vacuum` | 状态 / 本地股票候选 / 支撑阻力历史 / 同步 / 清理 JSON；`schema` 输出 SQL；`sync-symbols` 和显式导入验证可连接 OpenD |
 | `watchlist [LIST.json]` | `--check-only`、`--action both\|put\|trend`、`--top 5\|10\|20`、`--rank-by`、`--config`、`--refresh`、`--port`、`--output` | 默认读 SQLite；可选 JSON 临时输入；全名单预检查及逐股研究 JSON |
 | `desktop` | `--classic`（可选旧面板） | 桌面窗口；需安装 desktop extra |
 | `paper` | `strategies`、`list`、`create`、`backtest`、`update ID`、`report ID`、`watch ID` | 本地股票模拟实验与JSON报告；详见[模拟盘](../guides/paper-trading.md) |
@@ -26,7 +26,7 @@
 
 输入股票代码时查询单股；省略代码时查询 SQLite Watchlist，`--watchlist PATH` 可只读本次 JSON 名单并合并排名。`add SYMBOL [--refresh]` 核验后写入 SQLite，不接受 `--watchlist`；JSON 导入使用 `db import-watchlist`。合并排名的 `--input` 使用原始多股票 dataset 离线重算；单股的 `--input` 仍要求输入仅包含请求股票。股票代码和 `--watchlist` 不能同时指定。
 
-桌面普通查询使用研究 CLI `--saved`：包括盘中在内都读取最近已保存的收盘报告；已有股票不自动刷新，无任何历史记录的单股首次手动查询仍会自动抓取。可用 `python -m moopython.research_cli put --saved --top 10` 查看全名单保存结果。`--saved` 与 `--input` / `--refresh` / `--update` 互斥；主动更新仍用 `--update`。结果的 `saved_view` 保留展示交易日、最近完成交易日及是否直接复用了预计算报告。
+桌面首页调用 `research_cli overview` 只读取 Watchlist 股票报价，显示股票名、股价和涨跌；日线价位在单股 `trend --depth` 中计算，并保存在 SQLite `price_signals` 表，供日后用 `./moomoo db price-signals SYMBOL --limit 20` 查询历史 JSON。卖出 Put 的普通查询使用研究 CLI `--saved`：包括盘中在内都读取最近已保存的收盘报告；已有股票不自动刷新，无任何历史记录的单股首次手动查询仍会自动抓取。可用 `python -m moopython.research_cli put --saved --top 10` 查看全名单保存结果。`--saved` 与 `--input` / `--refresh` / `--update` 互斥；主动更新仍用 `--update`。结果的 `saved_view` 保留展示交易日、最近完成交易日及是否直接复用了预计算报告。
 
 名单管理：`db watchlist` 查看成员；`db import-watchlist FILE.json [--replace] [--refresh] [--port N]` 验证后合并，replace 为替换；`db export-watchlist FILE.json` 导出备份。空 JSON 在导入时表示空集合，replace 可明确清空；默认合并不删除既有成员。只有显式导入验证刷新可能连接 OpenD，查看与导出始终本地。
 
@@ -39,6 +39,8 @@
 ```sh
 apps/python/.venv/bin/python -m moopython.research_cli put AVGO --top 10
 apps/python/.venv/bin/python -m moopython.research_cli trend AVGO
+apps/python/.venv/bin/python -m moopython.research_cli overview
+apps/python/.venv/bin/python -m moopython.research_cli trend AVGO --update --depth
 apps/python/.venv/bin/python -m moopython.research_cli put --watchlist examples/watchlist.json --top 10
 apps/python/.venv/bin/python -m moopython.research_cli add MSFT --refresh
 apps/python/.venv/bin/python -m moopython.research_cli put AVGO \

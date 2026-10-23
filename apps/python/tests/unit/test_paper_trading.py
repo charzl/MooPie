@@ -40,7 +40,7 @@ OBSERVED='2026-10-17T17:00:00+00:00'
 
 class PaperTradingTests(unittest.TestCase):
     def test_replay_executes_only_after_signal_and_is_deterministic(self):
-        data=fixture(); config=configuration(['US.TEST'],slippage_bps=0,fee_bps=0)
+        data=fixture(); config=configuration(['US.TEST'],slippage_bps=0,fee_bps=0,initial_capital=10000)
         start=data['daily_series'][0]['bars'][254]['date']
         initial=initialize(data,config,OBSERVED,'backtest',start)
         before=copy.deepcopy((initial,data))
@@ -65,7 +65,7 @@ class PaperTradingTests(unittest.TestCase):
 
     def test_costs_reduce_return_and_cash_injections_are_not_profit(self):
         data=fixture(); start=data['daily_series'][0]['bars'][254]['date']
-        config=configuration(['US.TEST'],slippage_bps=5,fee_bps=1); config['initial_capital']=100
+        config=configuration(['US.TEST'],slippage_bps=5,fee_bps=1,initial_capital=100,funding_mode='auto_deposit')
         initial=initialize(data,config,OBSERVED,'backtest',start)
         state,rows,fills=advance(initial,data,OBSERVED)
         client=next(c for c in state['clients'] if c['strategy']=='buy_hold')
@@ -83,7 +83,7 @@ class PaperTradingTests(unittest.TestCase):
         original=copy.deepcopy(data['daily_series'][0]['bars'])
         for bar in data['daily_series'][0]['bars'][255:]:
             for field in ('open','close','low','high'): bar[field]=(bar[field]-2)/2
-        config=configuration(['US.TEST'],slippage_bps=0,fee_bps=0)
+        config=configuration(['US.TEST'],slippage_bps=0,fee_bps=0,initial_capital=10000)
         state,rows,_=advance(initialize(data,config,OBSERVED,'backtest',start),data,OBSERVED)
         baseline=next(c for c in state['clients'] if c['strategy']=='buy_hold')
         value=[r for r in rows if r['client_id']==baseline['id'] and r['date']==day][0]
@@ -186,7 +186,7 @@ class PaperTradingTests(unittest.TestCase):
             for i,bar in enumerate(row['bars']):
                 price=1000-i
                 bar.update(open=price,close=price,low=price-1,high=price+1)
-        config=configuration(['US.TEST','US.OTHER'],slippage_bps=0,fee_bps=0)
+        config=configuration(['US.TEST','US.OTHER'],slippage_bps=0,fee_bps=0,initial_capital=20000)
         self.assertEqual(len(config['clients']),6)
         self.assertEqual(config['symbols'],['US.TEST','US.OTHER'])
         self.assertEqual(set(config['market_symbols']),{'US.TEST','US.OTHER','US.QQQ','US.SPY'})
@@ -208,6 +208,69 @@ class PaperTradingTests(unittest.TestCase):
         data=fixture(); data['daily_series']=[r for r in data['daily_series'] if r['symbol']!='US.SPY']
         with self.assertRaisesRegex(ValueError,'frozen universe'):
             initialize(data,configuration(['US.TEST']),OBSERVED)
+
+    def test_client_capitals_are_independent_frozen_and_persisted(self):
+        data=fixture(); overrides={'client-001':250000,'client-005':700000}
+        config=configuration(['US.TEST'],client_capitals=overrides)
+        self.assertEqual(config['initial_capital'],500000)
+        self.assertEqual(config['funding_mode'],'fixed')
+        with tempfile.TemporaryDirectory() as root:
+            store=PaperStore(SnapshotStore(Path(root)/'ledger.sqlite3'))
+            report=store.create('Separate money',data,config,OBSERVED)
+            overrides['client-001']=1; config['clients'][0]['initial_capital']=1
+            saved=store.report(report['id'])
+            for client in saved['clients']:
+                expected=250000 if client['id']=='client-001' else 700000 if client['id']=='client-005' else 500000
+                self.assertEqual(client['initial_capital'],expected)
+                self.assertEqual(client['cash'],expected)
+                self.assertEqual(client['contributions'],expected)
+            with store.store.connect() as db:
+                amounts=dict(db.execute('SELECT client_id,initial_capital FROM paper_clients'))
+            self.assertEqual(amounts['client-001'],250000)
+            self.assertEqual(amounts['client-005'],700000)
+
+    def test_fixed_cash_includes_fees_never_topups_and_shares_scarce_cash(self):
+        data=fixture(260)
+        stock=copy.deepcopy(data['daily_series'][0]); stock['symbol']='US.OTHER'
+        data['daily_series'].append(stock); data['actions'].append(dict(symbol='US.OTHER',rows=[]))
+        start=data['daily_series'][0]['bars'][254]['date']
+        config=configuration(['US.TEST','US.OTHER'],initial_capital=100,
+                             client_capitals={'client-005':200},fee_bps=10)
+        state,rows,fills=advance(initialize(data,config,OBSERVED,'backtest',start),data,OBSERVED)
+        self.assertTrue(all(r['deposit']==0 and r['cash']>=0 for r in rows))
+        for client in state['clients']:
+            self.assertEqual(client['contributions'],client['initial_capital'])
+        baseline=next(c for c in state['clients'] if c['strategy']=='buy_hold')
+        trades=[f for f in fills if f['client_id']==baseline['id']]
+        self.assertEqual(len(trades),2)
+        self.assertAlmostEqual(trades[0]['quantity']*trades[0]['price'],trades[1]['quantity']*trades[1]['price'],places=3)
+        self.assertLess(sum(t['quantity']*t['price']+t['fee'] for t in trades),100)
+        self.assertTrue(any(r['execution_events'] for r in rows))
+        etf=next(c for c in state['clients'] if c['strategy']=='buy_qqq')
+        self.assertLess(etf['cash'],.001)
+        self.assertEqual(etf['initial_capital'],200)
+
+    def test_bad_client_capital_configuration_fails_before_fetching(self):
+        for bad in (0,-1,True,float('nan'),float('inf'),'500000'):
+            with self.subTest(capital=bad),self.assertRaises(ValueError):
+                configuration(['US.TEST'],initial_capital=bad)
+            with self.subTest(override=bad),self.assertRaises(ValueError):
+                configuration(['US.TEST'],client_capitals={'client-001':bad})
+        for overrides in ([],{'client-007':100},{'client-1':100}):
+            with self.assertRaises(ValueError): configuration(['US.TEST'],client_capitals=overrides)
+        with self.assertRaises(ValueError): configuration(['US.TEST'],funding_mode='borrow')
+
+    def test_old_reports_keep_original_capital_without_rewriting_state(self):
+        state=initialize(fixture(),configuration(['US.TEST']),OBSERVED)
+        state['version']='1.1.0'; state['config']['initial_capital']=10000
+        state['config'].pop('funding_mode')
+        for client in state['clients']:
+            client.pop('initial_capital'); client['cash']=client['nav']=client['contributions']=10000
+        before=copy.deepcopy(state)
+        report=summarize(state,[])
+        self.assertTrue(all(c['initial_capital']==10000 for c in report['clients']))
+        self.assertEqual(state,before)
+        with self.assertRaisesRegex(ValueError,'version changed'): advance(state,fixture(),OBSERVED)
 
 
 if __name__=='__main__': unittest.main()

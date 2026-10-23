@@ -53,13 +53,15 @@ apps/python/.venv/bin/python -m moopython.research_cli trend AVGO
 
 ## 多股票 schema
 
-使用一张 `snapshots` 表存所有股票，没有“一只股票一张表”。schema 版本5由 `PRAGMA user_version` 标记；旧版自动事务迁移，保留原始ID、压缩行情和校验和，失败会回滚，不需要重新采集。v3新增 `securities` 和 `security_aliases`，v4新增 `watchlist`；v5新增模拟盘的实验、客户、审计输入、成交和估值五张表。目前共10张应用表，已有行情和证券目录不重建。模拟盘账本与审计输入不参加行情快照清理，详见[模拟盘存储](paper-trading.md#保存与升级)。
+使用一张 `snapshots` 表存所有股票，没有“一只股票一张表”。schema 版本6由 `PRAGMA user_version` 标记；旧版自动事务迁移，保留原始ID、压缩行情和校验和，失败会回滚，不需要重新采集。v3新增 `securities` 和 `security_aliases`，v4新增 `watchlist`；v5新增模拟盘的实验、客户、审计输入、成交和估值五张表；v6新增 `price_signals` 表，按股票、日线日期、报价时间和算法版本保存支撑阻力及完整证据。目前共11张应用表，已有行情和证券目录不重建。模拟盘账本、审计输入与价格信号历史不参加行情快照清理，详见[模拟盘存储](paper-trading.md#保存与升级)。
 
 结构定义独立放在 [`moopython/database/migrations`](../../apps/python/moopython/database/migrations)，按版本顺序执行；已应用的迁移不修改，新增结构用下一个版本。SQL 定义表和索引，Python 迁移钩子仅负责从旧 `request_key` 补充股票与操作类型。所有待执行步骤、数据转换和版本号在同一事务内完成；当前版本的库不会重建。
 
 可直接查看自动生成的 [`schema.sql`](../../apps/python/moopython/database/schema.sql)，或执行 `./moomoo db schema` 输出当前结构。该命令在内存中重放迁移，不打开个人行情库、不连接 OpenD。`schema.sql` 供查阅，不用于直接升级现有数据库。
 
 开发时更新迁移后，运行 `apps/python/.venv/bin/python scripts/export-database-schema.py` 重新生成；加 `--check` 只检查是否一致。独立 SQL 文件随 wheel 和桌面包分发，不要求用户手动执行 SQL。
+
+个股详情的有效支撑阻力保存在 `price_signals` 表；每条记录含日线截止日、当时的参考价和报价时间、算法版本、计算时间及完整区间与转折证据。同一报价时间重复计算会更新同一条记录，不同时间保留历史。用 `./moomoo db price-signals AVGO --limit 20` 可读取该股历史 JSON，无需连接 OpenD。
 
 | 字段 | 作用 |
 | --- | --- |

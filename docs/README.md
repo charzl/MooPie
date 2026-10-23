@@ -15,6 +15,7 @@
 | --- | --- |
 | [Agent 工作流](guides/agent-workflows.md) | agent 如何检查环境、调用工具、解析结果并交付 |
 | [筛选卖出 Put](guides/put-screening.md) | 先 Filter、再 Sort、最后取 Top 5/10/20 |
+| [持仓效率](guides/position-efficiency.md) | 不计风险，比较剩余收益 / 时间与开仓效率，辅助评估提前平仓 |
 | [Watchlist 与预检查](guides/watchlists.md) | 验证全部股票代码，再逐只返回 Put / 走势 |
 | [分析股票趋势](guides/trend-analysis.md) | 获取已完成日线，解释走势证据和改判条件 |
 | [股票策略模拟盘](guides/paper-trading.md) | 创建虚拟客户、更新前向记录、单独回测及比较1 / 3 / 6个月 |

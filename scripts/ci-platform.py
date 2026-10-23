@@ -29,6 +29,7 @@ for directory, pattern in [('tests/unit', 'test_setup_*.py'), ('apps/python/test
                            ('apps/python/tests/unit', 'test_saved_research.py'),
                            ('apps/python/tests/unit', 'test_price_signals.py'),
                            ('apps/python/tests/unit', 'test_opend_manager.py'),
+                           ('apps/python/tests/unit', 'test_position_efficiency.py'),
                            ('apps/python/tests/unit', 'test_paper*.py'),
                            ('modules/put-screener/tests', 'test*.py')]:
     run(sys.executable, '-m', 'unittest', 'discover', '-s', directory, '-p', pattern, '-v')

@@ -528,6 +528,84 @@ OpenD 连接	OpenD Connection
 日线校验未通过	Daily history validation failed
 '''
 
+CATALOG += '''
+首页 · Watchlist	Home · Watchlist
+Watchlist · 股价和涨跌	Watchlist · Price and Change
+股票	Stock
+股价	Price
+涨跌	Change
+Watchlist · 股票价格与基本信息	Watchlist · Prices and Company Details
+个股依据 · 支撑阻力、买卖盘与趋势	Stock Evidence · Price Zones, Order Book and Trend
+代码	Ticker
+名称	Name
+类型	Type
+最新价	Last Price
+较昨收	Vs Previous Close
+报价时间（纽约）	Quote Time (New York)
+买卖盘价位	Order Book Levels
+买盘挂单量较集中的价位	Largest Visible Bid Levels
+卖盘挂单量较集中的价位	Largest Visible Ask Levels
+可见挂单量	Visible Size
+档位	Level
+买盘服务器时间	Bid Server Time
+卖盘服务器时间	Ask Server Time
+未提供，无法核对交易所更新时间	Unavailable; exchange update time cannot be checked
+没有可见档位。	No visible levels.
+盘口不可用	Order book unavailable
+历史转折	Historical pivots
+'''
+
+CATALOG += '''
+持仓效率 · 不考虑风险	Position Efficiency · Risk Excluded
+持仓效率	Position Efficiency
+指标已计算 · 平仓阈值尚未设置	Indicator calculated · No exit threshold configured
+未触发设定的效率退出条件	Configured efficiency exit condition is not triggered
+低于设定阈值 · 考虑买回平仓	Below the configured threshold · Consider buying to close
+平仓阈值	Exit Threshold
+开仓效率基准不等于退出阈值。退出阈值由后续模拟盘策略单独指定，80%仅是待测试候选。	The entry benchmark is separate from the exit threshold. Future paper strategies will configure their own threshold; 80% is a candidate to test.
+手动计算 · 现金担保 Put	Manual Calculation · Cash-Secured Put
+填写真实开仓信息。开仓权利金和当前回购价均为每股价格，按一张100股标准合约计算。	Enter the actual entry information. Entry premium and buyback price are per share, for one standard 100-share contract.
+开仓日期	Opening Date
+评估日期	Assessment Date
+开仓权利金／股 $	Entry Premium / Share $
+当前回购价／股 $	Buyback Price / Share $
+请输入价格	Enter a price
+回购价参考所选合约 Ask，报价时间	Buyback price uses the selected contract's Ask. Quote timestamp
+纽约时间。请核对可成交价格。	New York time. Verify the executable price.
+当前回购价请填写可成交买价；不要使用卖出时参考的 Bid。	Enter an executable buyback price, rather than the Bid used for selling.
+补齐开仓日期、开仓权利金和其他输入后，自动计算。	Complete the entry date, entry premium and other inputs to calculate automatically.
+请核对输入：日期使用YYYY-MM-DD，开仓早于到期、评估不早于开仓；权利金与行权价大于0，回购价不小于0。	Check inputs: use YYYY-MM-DD dates; opening precedes expiry and assessment is on or after opening. Entry premium and strike must be positive; buyback price must be nonnegative.
+保留率	Efficiency Retained
+效率不低于开仓基准 · 倾向继续持有	Efficiency meets or exceeds the entry benchmark · Holding favored
+效率低于开仓基准 · 评估提前平仓	Efficiency is below the entry benchmark · Review early close
+尚未盈利 · 不适用止盈判断	Not profitable · Profit-taking assessment does not apply
+开仓当天 · 暂不提供持有或止盈倾向	Opening day · No hold or profit-taking indication yet
+已到期 · 不适用剩余效率判断	Expired · Remaining-efficiency assessment does not apply
+已获利	Profit Captured
+已用时间	Time Elapsed
+剩余	Remaining
+开仓最大日均收益率	Initial Maximum Daily Return
+剩余最大日均收益率	Remaining Maximum Daily Return
+保留率 =（回购价 ÷ 剩余天数）÷（开仓权利金 ÷ 原始期限）×100%。	Efficiency Retained = (buyback price / remaining days) / (entry premium / initial days) × 100%.
+100%为开仓效率基准；低于100%表示效率下降，高于100%表示剩余效率更高。	100% is the entry benchmark. Below 100% means lower efficiency; above 100% means higher remaining efficiency.
+仅比较最大收益上限与时间，忽略风险、费用和利息，不改变当前 Put 排名，也不自动交易。	Compares maximum return and time only, excluding risk, fees and interest. Does not affect Put rankings or execute trades.
+关闭	Close
+'''
+
+CATALOG += '''
+三个策略与股票池买入持有，并列比较 QQQ 和 SPY 大盘基线。默认各账户本金相同，也可独立设置。	Compare three strategies, stock-universe buy-and-hold, QQQ and SPY. Accounts start with equal capital by default; individual amounts are configurable.
+每个客户的起始资金	Starting Capital by Client
+每个账户独立使用自己的资金；留相同本金便于比较策略。修改仅用于新实验。	Each account has its own funds. Equal starting amounts help compare strategies. Changes apply to new experiments only.
+起始资金 $	Starting Capital $
+默认起始资金 $	Default Starting Capital $
+单独设置资金…	Customize Client Capital…
+全部使用默认本金	Use Default for All
+资金模式	Funding Mode
+固定资金	Fixed Capital
+自动追加资金	Automatic Deposits
+固定资金不自动补资，现金不足时等额缩小新买单。单股投入决定策略资金利用率；QQQ / SPY 以各自本金建仓。	Fixed capital never adds funds; new buys share available cash when needed. Per-stock budgets determine strategy exposure; QQQ / SPY invest their respective starting capital.
+'''
+
 TRANSLATIONS=dict(line.split('\t',1) for line in CATALOG.strip().splitlines() if '\t' in line)
 # One pass prevents translated output from being translated again. Single Chinese
 # characters are translated only as whole values, never inside company names.

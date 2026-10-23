@@ -9,7 +9,8 @@
 
 - **筛选卖出 Put**：选择股票和 Filter，点击表头排序，返回 Top 5 / 10 / 20 候选，展示收益、风险、到期日及担保成本。
 - **分析走势**：根据已完成日线展示均线、RSI、MACD、关键价位和判断依据。
-- **策略模拟盘**：比较趋势、动量、短期反转与买入持有，包含 QQQ / SPY 大盘基准，记录虚拟客户及1 / 3 / 6个月观察结果，见[使用说明](docs/guides/paper-trading.md)。
+- **持仓效率**：填写开仓信息，比较剩余收益与时间；100%为开仓效率基准。暂不考虑风险，退出阈值为后续模拟盘预留可选参数。见[指标说明](docs/guides/position-efficiency.md)。
+- **策略模拟盘**：比较趋势、动量、短期反转与买入持有，包含 QQQ / SPY 大盘基准，每位客户本金可配置（默认50万美元），记录虚拟客户及1 / 3 / 6个月观察结果，见[使用说明](docs/guides/paper-trading.md)。
 - 同时提供桌面界面、命令行和本地只读 MCP；研究功能不下单。
 
 ## 快速开始
@@ -41,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
 
 安装脚本准备 Python 3.14 和项目依赖，无需手动激活虚拟环境。只用 CLI / MCP 时，省略 `--desktop` 或 `-Desktop`。
 
-打开界面，默认显示 Watchlist 已保存的收盘排名，并恢复排序和 Top 5 / 10 / 20 设置。盘中也先看上一交易日的收盘结果；右下角「更新行情」主动刷新。输入代码可查询单股，首次查询本地没有的新股票会自动抓取。更改 Top、Filter 或排序复用已有数据。详见[Watchlist](docs/guides/watchlists.md)与[数据库说明](docs/guides/database.md)。
+打开界面，首页和左侧 Watchlist 只显示股票名、股价、涨跌；绿色表示上涨，红色表示下跌。悬停可查看报价时间。点击股票进入个股详情，查看日线支撑阻力、趋势及前十档可见买卖盘；支撑阻力及计算依据会保存到 SQLite，供以后查询历史变化。盘口时间缺失时会明确提示。右下角「更新行情」主动刷新。输入代码仍可筛选卖出 Put，原有 Top 5 / 10 / 20、Filter 和排序设置继续适用。详见[Watchlist](docs/guides/watchlists.md)与[数据库说明](docs/guides/database.md)。
 
 关注名单保存在 SQLite。点「管理 Watchlist」可选中股票、删除，再点「确认保存」生效；取消则保留原名单。已有旧 JSON 会自动迁入一次，日常无需维护文件。
 

@@ -154,9 +154,11 @@ Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(datas
 
 新版 GUI 用独立设置键 `put_recommendation_configuration_v1`，保留旧设置且不自动继承旧全条件配置。已有新版配置继续复用，不随意重置用户选择。恢复默认 Filter 使用 `recommendation_configuration()`。趋势描述与风险提示不随过滤开关消失。
 
-桌面配置界面在 `research_controls.py`，不是第二套规则。修改配置后优先通过研究子进程的 `--input` 离线重算现有 `input_dataset`，保持原始 `collected_at`。桌面正常查询带 `--saved`，通过 `saved_research.py` 读取最近已保存收盘报告，盘中也展示上一完成交易日；启动显示整个 Watchlist，恢复 Sort / Top 设置。更新后的收盘报告保存在原 snapshots 表，键绑定原始ID、参数和分析实现；旧库首次离线生成。盘中快照不能替代默认收盘报告，不同交易日不得合并。已有股票无收盘数据明确要求页签外右下角「更新行情」；从未采集过的单股首次手动查询自动抓取。原始采集 CLI / MCP 的时段路由不变。股票/端口改变后丢弃界面输入；导出包含数据、实际配置和证据。日线抓取失败需保留期权数据和明确错误：启用趋势 Filter 时阻止候选，用户关闭后可继续其他过滤。
+桌面配置界面在 `research_controls.py`，不是第二套规则。修改配置后优先通过研究子进程的 `--input` 离线重算现有 `input_dataset`，保持原始 `collected_at`。桌面启动先显示 Watchlist 价格总览与基本信息；股票逐行保留报价时间，支撑阻力使用最新已完成日线及报价计算。点击股票进入详情，按需读取前十档可见买卖盘，盘口时间缺失必须标明。卖出 Put 的正常查询仍带 `--saved`，通过 `saved_research.py` 读取最近已保存收盘报告，盘中也展示上一完成交易日，并恢复 Sort / Top 设置。更新后的收盘报告保存在原 snapshots 表，键绑定原始ID、参数和分析实现；旧库首次离线生成。盘中快照不能替代默认收盘报告，不同交易日不得合并。已有股票无收盘数据明确要求页签外右下角「更新行情」；从未采集过的单股首次手动查询自动抓取。原始采集 CLI / MCP 的时段路由不变。股票/端口改变后丢弃界面输入；导出包含数据、实际配置和证据。日线抓取失败需保留期权数据和明确错误：启用趋势 Filter 时阻止候选，用户关闭后可继续其他过滤。
 
 输入候选的爱心由 `symbol_favorites.py` 绘制，点击经独立QProcess只验证身份并写Watchlist，不触发研究、不更改输入。实心仅表示已加入；删除仍在管理窗口确认。Put 完成后，走势页复用 canonical underlyings，不重复抓取；不足205根完整日线明确显示现有数量和原因，不编造长均线或趋势结论。
+
+持仓效率由 `position_efficiency.py` 独立计算，`efficiency_dialog.py` 通过候选区「持仓效率」入口展示。按固定全额担保本金、自然日，E=(回购价/剩余天数)/(开仓权利金/原始期限)×100%；100%仅为原始效率基准。退出阈值独立参数exit_threshold_pct，默认None只观察；显式配置后E严格低于阈值才触发buy_to_close信号，等于不触发。80%只是待测候选，不设为已确认最优值；未来模拟盘按实验冻结配置，当前股票模拟器尚未接入Put退出。按用户当前要求不计风险、费用、利息，不改变Put排名；不是最优退出或预期收益。未盈利、当天开仓、已到期明确标记适用性。开仓信息必须手填，Ask / 交易日仅预填行情事实，不猜测持仓，也不新建交易上下文。见[指标说明](docs/guides/position-efficiency.md)。
 
 桌面候选列表在 `research_table.py`，使用原生 Qt 表格，仅展示规则引擎返回值。排序入口只保留列头点击，不再显示重复的「收益优先 / 风险优先 / 综合 / 表头排序」下拉框；Top 数量和 Filter / 评分设置保留。列头通过配置触发完整缓存离线重算，不启用 Qt 对可见 Top N 的局部排序。点选合约后详情必须对应所选行；输入改变、重新抓取、取消或失败时清除过期候选。走势在独立页签，不需要网页服务。
 
@@ -168,9 +170,9 @@ Filter 与 Sort 分离：日常 CLI/桌面调用独立文件的 `recommend(datas
 
 ## 7. 验证与交付
 
-模拟盘v1.1默认6个客户，范围6–100，始终包含QQQ和SPY两个独立买入持有基准。config.symbols冻结策略股票池，market_symbols额外包含QQQ/SPY；每个客户的symbols明确限制选股，不能把两个额外ETF悄悄混进策略候选池。两个ETF账户以相同的完整起始参考资金建仓，费用、滑点、分红、下一开盘时序保持一致。默认表格比较相对SPY收益，JSON和详情另有相对QQQ / 股票池收益差；不是风险调整后的Alpha。旧v1.0实验不倒填基准，创建新版本实验，旧报告收益差可为空。
+模拟盘v1.2默认6个客户，范围6–100，始终包含QQQ和SPY两个独立买入持有基准。config.symbols冻结策略股票池，market_symbols额外包含QQQ/SPY；每个客户的symbols明确限制选股，不能把两个额外ETF悄悄混进策略候选池。每客户默认500000美元，可独立设置initial_capital；funding_mode默认fixed、不补资，auto_deposit明确启用追加。两个ETF账户以各自完整起始本金建仓，费用、滑点、分红、下一开盘时序保持一致。默认表格比较相对SPY收益，JSON和详情另有相对QQQ / 股票池收益差；不是风险调整后的Alpha。旧v1.0实验不倒填基准，创建新版本实验，旧报告收益差可为空。
 
-股票模拟盘分为 paper_strategies.py（独立策略）、paper_engine.py（纯账本与时序）、paper_data.py（行情抓取）、paper_store.py（SQLite v5）、paper_cli.py 和 paper_ui.py。只调用行情接口，不创建真实交易上下文。创建时冻结股票池、参数和引擎源文件哈希；已有实验实现变化后拒绝继续更新，保留旧报告并新建实验。PyInstaller需额外打包paper_engine.py / paper_strategies.py两份源码作为哈希审计资源。前向信号不能倒填过去开盘；历史回测单独标记，未到的1 / 3 / 6个月结果必须pending。任一股票日线不足253天、日历不齐或公司行动不支持时阻止整组推进，不擅自删股。无限现金用等额参考资金及自动补资记账，收益用时间加权净值。行情保留期不能清理模拟盘输入或账本。桌面不轮询，仅显式更新或执行高级 paper watch 时抓取；没有配置每日 CI 或系统后台任务。
+股票模拟盘分为 paper_strategies.py（独立策略）、paper_engine.py（纯账本与时序）、paper_data.py（行情抓取）、paper_store.py（SQLite v5）、paper_cli.py 和 paper_ui.py。只调用行情接口，不创建真实交易上下文。创建时冻结股票池、参数和引擎源文件哈希；已有实验实现变化后拒绝继续更新，保留旧报告并新建实验。PyInstaller需额外打包paper_engine.py / paper_strategies.py两份源码作为哈希审计资源。前向信号不能倒填过去开盘；历史回测单独标记，未到的1 / 3 / 6个月结果必须pending。任一股票日线不足253天、日历不齐或公司行动不支持时阻止整组推进，不擅自删股。固定资金不足时新买单等额分享可用现金并预留费用；自动补资模式单独记账，收益用时间加权净值。本金与单股投入独立，比较收益要同时查看实际持仓比例。新实验冻结每客户金额，旧实验本金不修改。行情保留期不能清理模拟盘输入或账本。桌面不轮询，仅显式更新或执行高级 paper watch 时抓取；没有配置每日 CI 或系统后台任务。
 
 桌面语言和外观由 `desktop_preferences.py` 管理，翻译目录为 `desktop_translations.py`，配色为 `desktop_theme.py`。语言为 zh / en，主题为 system / dark / light，用原 QSettings 的 ui_language / ui_theme 保存，默认中文和跟随系统。动态展示文字经 ui.set_text 保存源文本，新增静态控件通过 localize_tree 注册；不得翻译或修改原始 report、股票代码、配置和导出数据。原生弹窗继承主窗口设置，表格自绘颜色须适配两种配色。切换语言 / 外观只重新展示，不调用研究或网络请求；系统颜色变化只影响 system 模式。
 
@@ -192,7 +194,9 @@ PYTHONPATH=apps/python apps/python/.venv/bin/python -m unittest discover -s apps
 
 跨平台工作流 `.github/workflows/client-platforms.yml` 必须同时跑 Windows 和 macOS 安装、命令、MCP、规则、独立 wheel 和研究界面测试。Windows 使用 PowerShell 真正执行，macOS 用 Bash；Windows 专项测试验证带空格路径、退出码与保留不完整环境。Windows 构建便携 EXE ZIP 并验证启动与 JSON 错误协议；macOS 打包工作流负责 DMG。不要把 wheel 或便携 ZIP 称作安装向导。
 
-桌面默认是 `research_ui.py`，按选标的 → 看首选候选 → 查看依据 → 独立模拟评估的流程组织；不要求沿用旧布局。输入代码或从左侧名单选择单股，左侧「全部 Watchlist」查询整个名单；候选展开时回车选定，收起时回车搜索 Put。标题与搜索同行，No.1为紧凑摘要，统计与Top / Filter同行；候选表至少预留5个完整行及表头、滚动条的高度，避免说明区挤压表格。左侧 Watchlist 菜单提供「查看」「加入」「管理」「更新目录」，右下角为行情更新。正常启动读 Watchlist 已保存的收盘报告，预览 / 测试不自动抓取。全名单对全部原始合约调用同一 `recommend()` 后取 Top 5/10/20，按相同条件每股保留20再归并，也不另写排序公式。原始合并输入支持离线筛选 / 表头排序，单股仍检查输入只包含该股票。
+桌面默认是 `research_ui.py`，按首页价格总览 → 点击个股查看价位与盘口 → 查看走势 / Put 依据 → 独立模拟评估的流程组织。输入代码仍可筛选 Put；从左侧名单选择单股直接进入技术面详情，左侧「全部 Watchlist」返回首页；候选展开时回车选定，收起时回车搜索 Put。标题与搜索同行，No.1为紧凑摘要，统计与Top / Filter同行；候选表至少预留5个完整行及表头、滚动条的高度。左侧 Watchlist 菜单提供「查看」「加入」「管理」「更新目录」，右下角为行情更新。全名单对全部原始合约调用同一 `recommend()` 后取 Top 5/10/20，按相同条件每股保留20再归并，也不另写排序公式。原始合并输入支持离线筛选 / 表头排序，单股仍检查输入只包含该股票。
+
+桌面截图、视觉检查和临时测试必须将 `MOOMOO_DB_PATH` 指向临时 SQLite 文件；不得在默认用户数据库运行测试名单的 `_merge(..., replace=True)` 或其他破坏性写入。读取真实用户行情库核对问题时先确认路径，保持只读；需要恢复数据时先做 SQLite 在线备份。
 
 Watchlist 以同一 SQLite 的 `watchlist` 表为准，schema4新增，成员有唯一 symbol、自增id、加入时间和来源。首次读取时将库旁旧 JSON 或旧 `MOOMOO_WATCHLIST_PATH` 指定文件一次迁入并保留原文件；初始化标记和成员同事务，之后不再读取旧文件。无旧数据的新安装种子在 `watchlist_store.py` 的 DEFAULT_SYMBOLS，删除后不恢复。加入通过研究子进程核验证券资料后事务写入，不抓期权报价；重复不新增。`watchlist_dialog.py` 暂存删除，确认保存才按旧成员ID删除，取消不写库，保留并发新增和历史行情；删空保持空。CLI 省略 JSON 路径默认查库，显式 JSON 是本次只读输入，导入 / 导出使用 db import-watchlist / export-watchlist；不再维护默认 JSON 或文件锁。全名单预检查失败阻止采集，单股失败保留部分结果。
 

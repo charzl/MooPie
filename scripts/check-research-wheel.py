@@ -20,6 +20,7 @@ from moopython.price_signals import price_position
 from moopython.price_signal_view import signals_html
 from moopython.market_repository import market_data_connection
 from moopython.saved_research import analysis_revision, completed_session
+from moopython.position_efficiency import put_efficiency
 from moopython.market_store import SnapshotStore
 from moopython.database import ROOT as DATABASE_ROOT, schema_sql
 from moopython.watchlist_cli import main as watchlist_main
@@ -45,8 +46,14 @@ assert Path(r.__file__).name == '_bundled_put_rules.py'
 assert len(engine_hash()) == 64 and len(STRATEGIES) == 6
 assert parts('10.11.7108') == (10,11,7108)
 assert len(analysis_revision()) == 64
+efficiency = put_efficiency(opening_premium=10,buyback_price=2,strike=100,
+    opened_on='2026-09-17',expires_on='2026-12-16',as_of='2026-10-17')
+assert abs(efficiency['retention_pct']-30)<1e-9 and efficiency['signal']=='observe'
 assert completed_session(datetime.fromisoformat('2026-10-19T15:00:00+00:00')) == '2026-10-16'
 assert configuration(['US.TEST'])['clients'][3]['strategy'] == 'buy_hold'
+capital_config=configuration(['US.TEST'],client_capitals={'client-005':750000})
+assert capital_config['initial_capital']==500000 and capital_config['funding_mode']=='fixed'
+assert capital_config['clients'][4]['initial_capital']==750000
 assert PaperStore(SnapshotStore('paper-wheel-check.sqlite3')).list() == []
 watchlist = WatchlistStore(SnapshotStore(Path('user data')/'market.sqlite3'))
 assert 'US.AVGO' in watchlist.symbols()

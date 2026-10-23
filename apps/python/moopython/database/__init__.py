@@ -4,9 +4,9 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 ROOT = Path(__file__).resolve().parent
-MIGRATIONS = ('001_initial.sql', '002_snapshot_metadata.sql', '003_security_directory.sql', '004_watchlist.sql', '005_paper_trading.sql')
+MIGRATIONS = ('001_initial.sql', '002_snapshot_metadata.sql', '003_security_directory.sql', '004_watchlist.sql', '005_paper_trading.sql', '006_price_signals.sql')
 
 
 def _execute(connection, script):

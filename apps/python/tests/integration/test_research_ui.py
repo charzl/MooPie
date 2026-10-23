@@ -37,14 +37,17 @@ class ResearchUiTests(unittest.TestCase):
 
     def test_refresh_button_is_explicit_and_targets_current_action(self):
         with patch.object(self.window, 'start') as start:
+            self.window.refresh_button.click()
+            start.assert_called_with('overview', update=True, refresh=False, depth=False)
+            self.window.analysis_stack.setCurrentIndex(1)
             self.window.tabs.setCurrentIndex(0)
             self.window.refresh_button.click()
-            start.assert_called_with('put', update=True)
+            start.assert_called_with('put', update=True, refresh=False, depth=False)
             self.window.tabs.setCurrentIndex(2)
             self.window.refresh_button.click()
-            start.assert_called_with('trend', update=True)
+            start.assert_called_with('trend', update=True, refresh=False, depth=False)
             self.window.force_refresh_action.trigger()
-            start.assert_called_with('trend', refresh=True)
+            start.assert_called_with('trend', update=False, refresh=True, depth=False)
 
     def test_suggestion_heart_adds_once_without_selecting_searching_or_discarding_results(self):
         from moopython.symbol_favorites import favorite_rect
@@ -100,20 +103,24 @@ class ResearchUiTests(unittest.TestCase):
         with self.watchlist_worker():
             self.window=ResearchWindow(settings,auto_load=True); self.window.show()
             self.app.processEvents(); self.wait_worker()
-            first=self.window.results['put']
+            first=self.window.results['overview']
             self.assertEqual(self.window.symbol.text(),'')
             self.assertEqual(first['query_scope'],'watchlist')
-            self.assertEqual(first['report']['top_n_requested'],20)
-            self.assertEqual(first['report']['sort_order'],config['sort_order'])
-            self.assertEqual(self.window.tabs.currentIndex(),0)
+            self.assertNotIn('price_signals', first)
+            self.assertEqual(self.window.analysis_stack.currentIndex(),0)
+            self.assertEqual(self.window.overview_table.rowCount(),2)
             self.assertFalse((Path(self.temp.name)/'requests.log').exists())
             self.assertGreater(self.window.refresh_button.geometry().top(),self.window.tabs.geometry().bottom())
             self.assertEqual(self.window.main_tabs.count(),2)
             self.assertEqual(self.window.main_tabs.tabText(0),'分析')
             self.assertEqual(self.window.tabs.count(),3)
+            self.window.start('put'); self.wait_worker()
+            report=self.window.results['put']['report']
+            self.assertEqual(report['top_n_requested'],20)
+            self.assertEqual(report['sort_order'],config['sort_order'])
             self.window.close(); self.window=ResearchWindow(settings,auto_load=True)
             self.app.processEvents(); self.wait_worker()
-            self.assertTrue(self.window.results['put']['saved_view']['precomputed'])
+            self.assertEqual(self.window.results['overview']['query_scope'],'watchlist')
 
     def test_paper_ledger_survives_language_theme_and_watchlist_changes_without_network(self):
         import runpy
@@ -150,6 +157,33 @@ class ResearchUiTests(unittest.TestCase):
             panel.current_report={'mode':'forward'}; panel.busy(False)
             panel.update_button.click(); worker.assert_called_once_with('update')
 
+    def test_paper_capital_settings_are_per_client_and_reach_worker_without_network(self):
+        from moopython.paper_ui import ClientCapitalDialog
+        panel=self.window.paper_panel
+        self.assertEqual(panel.initial_capital.value(),500000)
+        self.assertEqual(panel.funding_mode.currentData(),'fixed')
+        self.window.ui.set_language('en')
+        dialog=ClientCapitalDialog(panel,6,500000,{'client-001':250000})
+        self.assertEqual(dialog.windowTitle(),'Starting Capital by Client')
+        self.assertEqual(dialog.values()['client-001'],250000)
+        self.assertEqual(dialog.values()['client-005'],500000)
+        dialog.amounts['client-005'].setValue(750000)
+        self.assertEqual(dialog.values()['client-005'],750000)
+        dialog.close(); dialog.deleteLater()
+        panel.client_capitals={'client-001':250000,'client-007':750000}
+        panel.symbols.setText('TEST')
+        with patch.object(QProcess,'start'),patch('socket.create_connection',side_effect=AssertionError('Offline')):
+            panel.run('create')
+            arguments=panel.process.arguments()
+            self.assertEqual(arguments[arguments.index('--initial-capital')+1],'500000.0')
+            self.assertEqual(arguments[arguments.index('--funding-mode')+1],'fixed')
+            file=Path(arguments[arguments.index('--client-capitals')+1])
+            self.assertEqual(json.loads(file.read_text()),{'client-001':250000})
+            self.assertFalse(panel.create_form.isEnabled())
+            panel.process.deleteLater(); panel.process=None; panel.busy(False)
+        self.window.ui.set_language('zh')
+        self.assertEqual(panel.funding_mode.currentText(),'固定资金')
+
     def test_price_signals_are_separate_from_rankings_and_clear_with_the_input(self):
         from moopython.research import analyze_put_dataset
         code=self.dataset['contracts'][0]['symbol']
@@ -163,6 +197,41 @@ class ResearchUiTests(unittest.TestCase):
         self.assertEqual(self.window.results['put']['report'],load_rules().recommend(self.dataset,per_symbol_limit=20))
         self.window.symbol.setText('NVDA')
         self.assertNotIn(code,self.window.price_signal_result.toPlainText())
+
+    def test_watchlist_shows_only_name_price_change_and_colors_direction(self):
+        from moopython.research import analyze_put_dataset
+        self.window.watchlist._merge(['US.TEST','US.TESTB'],'test',replace=True)
+        self.window.display_overview(dict(action='overview', collected_at='2026-10-22T20:00:00+00:00', rows=[
+            dict(symbol='US.TEST', name='Test Company', price=110, change_pct=10, update_time='2026-10-22 16:00:00'),
+            dict(symbol='US.TESTB', name='Another Company', price=90, change_pct=-10, update_time='2026-10-22 16:00:00')]))
+        self.assertEqual(self.window.overview_table.columnCount(), 3)
+        self.assertEqual([self.window.overview_table.horizontalHeaderItem(i).text() for i in range(3)], ['股票', '股价', '涨跌'])
+        self.assertEqual(self.window.overview_table.item(0,0).text(), 'Test Company')
+        self.assertEqual(self.window.overview_table.item(0,1).text(), '$110.00')
+        self.assertEqual(self.window.overview_table.item(0,2).text(), '+10.00%')
+        self.assertEqual(self.window.overview_table.item(1,2).text(), '-10.00%')
+        self.assertGreater(self.window.overview_table.item(0,2).foreground().color().green(), self.window.overview_table.item(0,2).foreground().color().red())
+        self.assertGreater(self.window.overview_table.item(1,2).foreground().color().red(), self.window.overview_table.item(1,2).foreground().color().green())
+        self.assertEqual(self.window.scope_list.item(1).text(), 'Test Company\n$110.00   +10.00%')
+        self.assertEqual(self.window.scope_list.item(2).text(), 'Another Company\n$90.00   -10.00%')
+        self.assertNotIn('支撑', self.window.scope_list.item(1).text())
+        result=analyze_put_dataset(self.dataset,'US.TEST')
+        signal=result['price_signals']['US.TEST']
+        signal['support_zones']=[dict(center=90.0,low=89.5,high=90.5,independent_touches=3,
+                                     distance_pct=4.0,distance_atr=1.0,evidence=[dict(date='2026-10-01')])]
+        signal['resistance_zones']=[dict(center=110.0,low=109.5,high=110.5,independent_touches=2,
+                                        distance_pct=4.0,distance_atr=1.0,evidence=[dict(date='2026-10-02')])]
+        self.window.display(result)
+        item=self.window.scope_list.item(1)
+        self.assertEqual(item.text(), 'Test Company\n$110.00   +10.00%')
+        self.assertIn('$89.50–$90.50', self.window.price_signal_result.toPlainText())
+        self.assertNotIn('支撑', item.toolTip())
+        self.window.change_language('en')
+        self.assertEqual(self.window.scope_list.item(1).text(), 'Test Company\n$110.00   +10.00%')
+        self.window.analysis_stack.setCurrentIndex(1)
+        self.window.change_theme('light')
+        self.assertEqual(self.window.analysis_stack.currentIndex(), 1)
+        self.assertGreater(self.window.overview_table.item(0,2).foreground().color().green(), self.window.overview_table.item(0,2).foreground().color().red())
 
     def test_put_query_populates_trend_tab_and_short_history_explains_missing_analysis(self):
         from moopython.research import analyze_put_dataset
@@ -192,16 +261,72 @@ class ResearchUiTests(unittest.TestCase):
         self.assertFalse(self.window.first_details.isEnabled())
         self.assertNotIn(first['expiration'],self.window.first_choice.text())
 
+    def test_efficiency_calculator_prefills_only_quote_facts_and_keeps_research_unchanged(self):
+        from moopython.research import analyze_put_dataset
+        from moopython.efficiency_dialog import EfficiencyDialog
+        result=analyze_put_dataset(self.dataset,self.dataset['contracts'][0]['symbol'])
+        self.window.display(result)
+        report=result['report'];row=report['ranked'][0]
+        dialog=EfficiencyDialog(self.window,row=row,session_date=report['session_date'],exit_threshold_pct=80)
+        try:
+            self.assertEqual(dialog.fields['opened_on'].text(),'')
+            self.assertEqual(dialog.fields['opening_premium'].text(),'')
+            self.assertEqual(float(dialog.fields['buyback_price'].text()),row['metrics']['ask'])
+            self.assertEqual(dialog.fields['as_of'].text(),report['session_date'])
+            self.assertIsNone(dialog.result)
+            with patch('socket.create_connection',side_effect=AssertionError('Calculator stays offline')), \
+                 patch.object(self.window,'start',side_effect=AssertionError('Do not rerank or refresh')):
+                values=dict(opened_on='2026-09-17',expires_on='2026-12-16',as_of='2026-10-17',
+                            strike='100',opening_premium='10',buyback_price='2')
+                for name,value in values.items(): dialog.fields[name].setText(value)
+                self.assertAlmostEqual(dialog.result['retention_pct'],30)
+                self.assertIn('30.00%',dialog.value.text())
+                self.assertIn('买回平仓',dialog.decision.text())
+                dialog.fields['as_of'].setText('2026-12-11')
+                self.assertAlmostEqual(dialog.result['retention_pct'],360)
+                self.assertIn('未触发',dialog.decision.text())
+                self.window.ui.set_language('en');self.window.ui.localize_tree(dialog)
+                self.assertIn('not triggered',dialog.decision.text())
+                self.assertNotRegex(dialog.breakdown.text(),'[\u4e00-\u9fff]')
+                dialog.fields['opening_premium'].clear()
+                self.assertIsNone(dialog.result)
+                self.assertEqual(dialog.value.text(),'—')
+                self.assertEqual(self.window.results['put'],result)
+        finally: dialog.close()
+
+    def test_efficiency_button_uses_the_selected_candidate_without_inventing_entry_data(self):
+        from moopython.research import analyze_put_dataset
+        result=analyze_put_dataset(self.dataset,self.dataset['contracts'][0]['symbol'])
+        self.window.display(result)
+        with patch('moopython.research_ui.EfficiencyDialog') as dialog:
+            self.window.efficiency_button.click()
+            args=dialog.call_args.kwargs
+            self.assertEqual(args['row']['code'],result['report']['recommendations'][0]['code'])
+            self.assertEqual(args['session_date'],result['report']['session_date'])
+            dialog.return_value.exec.assert_called_once()
+
     def test_sidebar_chooses_single_stock_or_entire_watchlist_without_changing_sort(self):
         config=json.dumps(self.window.configuration,sort_keys=True)
         with patch.object(self.window,'start') as start:
             self.window.choose_scope(self.window.scope_list.item(1))
             self.assertEqual(self.window.symbol.text(),'AVGO')
-            start.assert_called_with('put')
+            start.assert_called_with('trend', depth=True)
             self.window.choose_scope(self.window.scope_list.item(0))
             self.assertEqual(self.window.symbol.text(),'')
-            start.assert_called_with('put')
+            start.assert_called_with('overview')
         self.assertEqual(json.dumps(self.window.configuration,sort_keys=True),config)
+
+    def test_open_stock_saves_support_and_resistance_for_later_lookup(self):
+        from moopython.price_signal_store import PriceSignalStore
+        self.window.watchlist._merge(['US.TEST'], 'test', replace=True)
+        self.window.update_watchlist_label()
+        with self.watchlist_worker():
+            self.window.open_stock('US.TEST'); self.wait_worker()
+        self.assertIn('trend', self.window.results, self.window.trend_result.toPlainText())
+        signal = self.window.results['trend']['price_signals']['US.TEST']
+        self.assertEqual(signal['status'], 'ok')
+        self.assertEqual(PriceSignalStore().latest('US.TEST')['signal'], signal)
+        self.assertIn('已保存到 SQLite', self.window.price_signal_result.toPlainText())
 
     def test_language_switch_is_instant_and_keeps_report_selection_and_saved_inputs(self):
         from moopython.research import analyze_put_dataset
@@ -289,6 +414,15 @@ from moopython import research_cli
 from moopython import market_collection
 from moopython.market_repository import market_data_connection
 class Metadata:
+    def snapshots(self, codes):
+        return dict(collected_at='2026-10-17T15:00:00+00:00',codes=codes,missing_codes=[],
+                    rows=[dict(code=c,name='Synthetic '+c,last_price=100.0,prev_close_price=99.0,
+                               update_time='2026-10-17 11:00:00') for c in codes])
+    def daily_bars(self, symbols, session_date=None, cutoff=None):
+        root=Path(__file__).parent
+        data=json.loads((root/'source.json').read_text(encoding='utf-8').replace('TEST',symbols[0].removeprefix('US.')))
+        return dict(daily_series=data['daily_series'],fetched_at='2026-10-17T15:00:00+00:00',
+                    decision_cutoff='2026-10-17T15:00:00+00:00')
     def collect_put_dataset(self, symbols, months=3):
         root=Path(__file__).parent
         with (root/'requests.log').open('a',encoding='utf-8') as log: log.write(','.join(symbols)+'\\n')
@@ -445,6 +579,8 @@ raise SystemExit(research_cli.main(sys.argv[sys.argv.index('moopython.research_c
         with self.watchlist_worker():
             self.window.view_watchlist_action.trigger(); self.wait_worker()
             self.assertEqual(self.window.symbol.text(), '')
+            self.assertEqual(self.window.analysis_stack.currentIndex(),0)
+            self.window.start('put'); self.wait_worker()
             for count in (5, 20):
                 self.window.top_count.setCurrentIndex(self.window.top_count.findData(count)); self.wait_worker()
                 self.assertEqual(self.window.candidate_table.rowCount(), count)
@@ -459,6 +595,7 @@ raise SystemExit(research_cli.main(sys.argv[sys.argv.index('moopython.research_c
     def test_incremental_update_button_reuses_all_existing_watchlist_quotes(self):
         self.seed_watchlist()
         with self.watchlist_worker():
+            self.window.start('put'); self.wait_worker()
             self.window.refresh_button.click(); self.wait_worker()
         result=self.window.results['put']
         self.assertEqual(result['data_access']['source'],'database')

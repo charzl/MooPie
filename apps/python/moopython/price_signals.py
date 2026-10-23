@@ -75,8 +75,8 @@ def price_position(series, trend, *, reference=None):
             raise ValueError('参考价格或 ATR 无效')
         bars = bars[-PARAMETERS['lookback']:]
         tolerance = max(atr*PARAMETERS['zone_atr_fraction'], price*PARAMETERS['zone_price_fraction'])
-        supports = [z for z in _zones(bars, 'support', tolerance) if z['low'] <= price]
-        resistances = [z for z in _zones(bars, 'resistance', tolerance) if z['high'] >= price]
+        supports = [z for z in _zones(bars, 'support', tolerance) if z['center'] < price]
+        resistances = [z for z in _zones(bars, 'resistance', tolerance) if z['center'] > price]
         for side, zones in [('support', supports), ('resistance', resistances)]:
             for zone in zones:
                 distance = max(0, price-zone['high']) if side=='support' else max(0, zone['low']-price)

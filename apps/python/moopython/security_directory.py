@@ -67,6 +67,16 @@ class SecurityDirectory:
             aliases = db.execute('SELECT count(*) FROM security_aliases').fetchone()[0]
         return dict(securities=count, aliases=aliases, updated_at=updated)
 
+    def lookup(self, codes):
+        """Read local names and security types for an explicit stock list."""
+        if not codes: return {}
+        normalized = [normalize_stock(code) for code in codes]
+        placeholders = ','.join('?' for _ in normalized)
+        with self.store.connect() as db:
+            rows = db.execute(f'SELECT code,name,security_type FROM securities WHERE code IN ({placeholders})',
+                              normalized).fetchall()
+        return {code: dict(name=name, security_type=kind) for code,name,kind in rows}
+
     def search(self, text, limit=20):
         pattern = search_pattern(text)
         if pattern is None: return []

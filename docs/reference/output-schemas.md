@@ -64,6 +64,8 @@ price_signals: 按股票代码组织的独立价格位置与择时信号
 
 两种研究另附 `price_signals`，与 `report` 平级：`version`、`status`（`ok` / `unavailable`）、`ranking_effect=none`、`assessment`、`summary`、`reference`（价格、时间、依据）、`as_of`、`parameters`、`support_zones` / `resistance_zones`、`next_check`、`limitations`。区域包含边界、中心、距离、独立转折数和带确认日期的证据。`order_flow.status=not_verified`、`buy_sell_ratio=null`；不能把历史区域当成当前买卖挂单。缺失日线返回不可用原因，现有排名报告保持原样。单股仅一个代码，Watchlist 包含各股票结果，逐股趋势的 `items[]` 内也保留同一结构。
 
+桌面首页的研究 CLI `overview` 返回 `rows[]`：`symbol`、`name`、`security_type`、`price`、`previous_close`、`change_pct`、`update_time`，以及报价的 `collected_at`、`data_access`。界面只显示股票名、股价和涨跌；缺失价格或昨收时对应数值为 `null`。个股 `trend --depth` 另附 `quote`、`order_book`；有效 `price_signals` 保存到 SQLite 并返回 `price_signal_saved_at`，当前计算失败且存在旧记录时返回 `saved_price_signal`（含 `signal` 和 `calculated_at`）。盘口含 `status`、`collected_at`、`bid_server_time`、`ask_server_time`、前十档 `bids` / `asks`（价、可见数量）。获取失败保留 `unavailable` 原因，不影响可用的趋势或报价。盘口不是 `price_signals.order_flow`，后者仍不声称已验证实际成交方向。
+
 桌面「导出结果」会再按动作包装：顶层的 `put` 和 / 或 `trend` 对应上述单股票研究结果。重算桌面 Put 导出时提取 `exported['put']['input_dataset']`；直接保存的研究 CLI Put 结果则提取 `result['input_dataset']`。再把原始 dataset 交给 `analyze` 或研究 CLI `--input`，报告本身不能当作原始数据。
 
 研究 CLI 的已处理运行错误为 `{"error":"..."}`，参数用法错误仍是 argparse stderr；先检查退出码再解析。
@@ -87,3 +89,5 @@ JSON 股票名单入口的报告另外包含 `precheck`、`results[]`、`summary
 `clients[]` 包含NAV、现金、累计注资、净损益、已实现 / 未实现损益、时间加权 `return_pct`、最大回撤、暴露、费用、滑点、成交数、双边成交额 / 平均NAV的换手率，以及 `excess_vs_buy_hold_pct`、`excess_vs_qqq_pct`、`excess_vs_spy_pct`（百分点差）。v1.1默认6客户，含buy_qqq / buy_spy；`benchmark_returns`给两个ETF收益，旧v1.0无对应记录时为null。`config.symbols`是策略池，`market_symbols`是附加ETF后的行情池，每个客户冻结自己的symbols与entry_notional；基准目标投入为完整起始参考资金。`periods[]` 为1 / 3 / 6个月，各有target_date、status、measured_date、return_pct、drawdown_pct；pending数值为null。
 
 `history[]` 按日期 / 客户保存每日估值、持仓、注资、公司行动和当日决策；`fills[]` 保存每次虚拟成交及 `signal_as_of` / `signal_generated_at`。更新另有 `new_valuations` / `new_fills`；同日再次更新两者为0。失败为error字符串，不能当作零收益。专用原始输入由 `paper_data.py` 定义：`daily_series` 必须是none复权、regular时段的已完成1d日线，另有按symbol归属的 `actions[].rows` 公司行动。普通Put数据不可直接用于模拟成交。
+
+模拟盘v1.2：config.initial_capital为新客户默认本金（500000美元），config.clients[].initial_capital冻结各客户实际本金，clients[].initial_capital直接展示实际起点；funding_mode为fixed或auto_deposit。固定资金不补资，history[].execution_events记录现金限制下的缩单；历史版本报告从原config.initial_capital读取起点，保留原模式。

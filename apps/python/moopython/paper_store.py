@@ -55,7 +55,7 @@ class PaperStore:
             input_id=self._input(db,experiment_id,payload,observed)
             for client in state['clients']:
                 db.execute('INSERT INTO paper_clients(experiment_id,client_id,strategy,initial_capital) VALUES (?,?,?,?)',
-                           (experiment_id,client['id'],client['strategy'],config['initial_capital']))
+                           (experiment_id,client['id'],client['strategy'],client['initial_capital']))
             anchors=[dict(client_id=c['id'],date=state['last_date'],nav=c['nav'],cash=c['cash'],
                           contributions=c['contributions'],net_pnl=0,return_pct=0,drawdown_pct=0,exposure_pct=0,
                           deposit=c['contributions'],fees=0,slippage=0,realized_pnl=0,closed_trades=0,wins=0,

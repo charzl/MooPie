@@ -26,12 +26,14 @@ flowchart TD
 | 新增或修正行情字段 | [market_collection.py](../../apps/python/moopython/market_collection.py) | 数据标准化、来源、时间、缺失和错误；不写策略 |
 | 查询时段与缓存策略 | [market_repository.py](../../apps/python/moopython/market_repository.py)、[market_sessions.py](../../apps/python/moopython/market_sessions.py) | 延迟连接 OpenD，盘后优先查匹配缓存、缺失自动抓取，保留原始时间 |
 | 持久化快照与清理 | [market_store.py](../../apps/python/moopython/market_store.py)、[database](../../apps/python/moopython/database)、[database_cli.py](../../apps/python/moopython/database_cli.py) | 独立版本化 SQL 迁移、压缩、校验和、保留期与清理；不写规则 |
+| 历史支撑阻力 | [price_signal_store.py](../../apps/python/moopython/price_signal_store.py)、[006_price_signals.sql](../../apps/python/moopython/database/migrations/006_price_signals.sql) | 保存个股有效价位、报价时间、算法版本与转折依据；支持按股票查询历史 |
 | 多股票快照复用 | [market_payloads.py](../../apps/python/moopython/market_payloads.py) | 批次投影为单股，组合时保留各自采集来源；不计算指标 |
 | 股票名称目录与候选 | [security_directory.py](../../apps/python/moopython/security_directory.py)、[symbol_search.py](../../apps/python/moopython/symbol_search.py) | 同一 SQLite 的证券 / 别名表；本地前缀与通配符匹配，用户选定代码后才研究，显式同步目录 |
 | 合约查询窗口与限流 | [options.py](../../apps/python/moopython/options.py) | 复用 `OptionChainService` |
 | 修改 Filter、指标、评分或趋势文字 | [put_rules.py](../../modules/put-screener/put_rules.py) | 唯一规则实现，标准库依赖，更新规则版本 |
 | 组合研究流程 | [research.py](../../apps/python/moopython/research.py) | 复用采集与规则；不依赖 Qt / MCP |
 | 独立价格信号 | [price_signals.py](../../apps/python/moopython/price_signals.py)、[price_signal_view.py](../../apps/python/moopython/price_signal_view.py) | 复用已验证日线识别潜在价位，单独展示；不写入现有排名、分数或 Filter，不将历史转折称为当前挂单 |
+| 首页价格与个股盘口 | [stock_overview.py](../../apps/python/moopython/stock_overview.py)、[order_book.py](../../apps/python/moopython/order_book.py) | 首页按名单顺序显示报价和本地证券名称；点个股才订阅盘口，列出可见档位与时间，不推断实际成交方向 |
 | 股票名单与预检查 | [watchlist.py](../../apps/python/moopython/watchlist.py)、[watchlist_cli.py](../../apps/python/moopython/watchlist_cli.py) | 全名单格式和证券身份验证通过才分析，逐股保留结果与错误；复用独立规则 |
 | 桌面全名单研究与管理 | [watchlist_research.py](../../apps/python/moopython/watchlist_research.py)、[watchlist_store.py](../../apps/python/moopython/watchlist_store.py)、[watchlist_dialog.py](../../apps/python/moopython/watchlist_dialog.py) | 原始输入合并后调用同一规则；SQLite 成员表、旧 JSON 一次迁入、核验添加、暂存删除后确认 |
 | 研究进程 JSON 边界 | [research_cli.py](../../apps/python/moopython/research_cli.py) | SDK 在子进程主线程；日志不污染结果 |
