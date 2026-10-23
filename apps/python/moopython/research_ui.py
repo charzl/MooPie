@@ -24,7 +24,7 @@ from .symbol_search import SymbolSuggestions
 from .watchlist_dialog import WatchlistDialog
 from .price_signal_view import signals_html
 from .security_directory import SecurityDirectory
-from .order_book import order_book_html
+from .order_book_chart import OrderBookChart
 from .desktop_preferences import DesktopPreferences
 from .paper_ui import PaperPanel
 from .desktop_widgets import SelectBox
@@ -267,8 +267,8 @@ class ResearchWindow(QMainWindow):
         card.addLayout(list_footer)
         self.put_result = QTextBrowser(); self.trend_result = QTextBrowser()
         self.price_signal_result = QTextBrowser()
-        self.order_book_result = QTextBrowser()
-        for panel in (self.put_result, self.trend_result, self.price_signal_result, self.order_book_result):
+        self.order_book_result = OrderBookChart()
+        for panel in (self.put_result, self.trend_result, self.price_signal_result):
             panel.setOpenExternalLinks(False)
         self.tabs.addTab(self.ranking_card, '推荐与候选')
         self.tabs.addTab(self.put_result, '合约详情 / 筛选依据')
@@ -339,10 +339,16 @@ class ResearchWindow(QMainWindow):
     def change_language(self, value):
         self.ui.set_language(value)
         self.update_watchlist_label()
+        if self.order_book_result.book:
+            self.order_book_result.set_book(self.order_book_result.book, self.order_book_result.quote,
+                                            language=value, theme=self.ui.effective_theme)
 
     def change_theme(self, value):
         self.ui.set_theme(value)
         self.update_watchlist_label()
+        if self.order_book_result.book:
+            self.order_book_result.set_book(self.order_book_result.book, self.order_book_result.quote,
+                                            language=self.ui.language, theme=self.ui.effective_theme)
         for index, row in enumerate(self.results.get('overview', {}).get('rows', [])):
             color = self.change_color(row.get('change_pct'))
             for column in (1, 2):
@@ -454,7 +460,7 @@ class ResearchWindow(QMainWindow):
         self.put_dataset = None
         self.ui.set_text(self.scope_heading,'分析 · '+(self.symbol.text().strip().upper() or 'Watchlist'))
         self.ui.set_text(self.price_signal_result, signals_html({}), 'setHtml')
-        self.ui.set_text(self.order_book_result, order_book_html(None), 'setHtml')
+        self.order_book_result.set_book(None, language=self.ui.language, theme=self.ui.effective_theme)
         self.clear_candidates('输入代码搜索单股，或留空查看默认 Watchlist。')
         self.ui.set_text(self.put_result, f'<h2>卖出 Put · Top {self.top_count.currentData()}</h2><p>先按 Filter 过滤，再按到期时长、担保成本、收益、风险或综合得分排序。</p><p style="color:#9aaab7">点击表头切换排序方向；设置页调整 Filter 和评分参数。</p>', 'setHtml')
         self.ui.set_text(self.trend_result, '<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>', 'setHtml')
@@ -502,7 +508,8 @@ class ResearchWindow(QMainWindow):
         self.export_button.setEnabled(bool(self.results))
         if action in ('put','trend'): self.ui.set_text(self.panel(action), f'<h2>{esc(code or "Watchlist")}</h2><p>正在抓取和分析…</p>', 'setHtml')
         if action == 'overview': self.ui.set_text(self.overview_note, '正在读取 Watchlist 的价格和基本信息…', 'setText')
-        if action == 'trend': self.ui.set_text(self.order_book_result, '正在读取买卖盘…' if depth else '点击左侧股票查看盘口。', 'setPlainText')
+        if action == 'trend': self.order_book_result.set_message('正在读取买卖盘…' if depth else '点击左侧股票查看盘口。',
+                                                                 language=self.ui.language, theme=self.ui.effective_theme)
         self.ui.set_text(self.status, '正在用已采集的数据重新过滤和排序，不重新抓取行情。' if reuse else
                             '正在刷新 OpenD 并保存数据库…' if refresh else '正在读取已保存的收盘结果；首次查询新股票时自动抓取…', 'setText')
         if action == 'add': self.ui.set_text(self.status, '正在核验证券基本资料并加入 Watchlist…', 'setText')
@@ -659,7 +666,8 @@ class ResearchWindow(QMainWindow):
         if result.get('price_signal_storage_error'):
             signal_view += '<p>支撑阻力未能写入 SQLite：' + esc(result['price_signal_storage_error']) + '</p>'
         self.ui.set_text(self.price_signal_result, signal_view, 'setHtml')
-        self.ui.set_text(self.order_book_result, order_book_html(result.get('order_book')), 'setHtml')
+        self.order_book_result.set_book(result.get('order_book'), result.get('quote'),
+                                        language=self.ui.language, theme=self.ui.effective_theme)
         heading = f'<h2>{esc(result["symbol"])} · {"卖出 Put" if action == "put" else "走势"}</h2>'
         if action == 'trend':
             content = (''.join('<h2>' + esc(item['symbol']) + '</h2>' + trend_html(item) for item in result['items'])

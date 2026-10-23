@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from moopython.order_book import order_book_html, read_order_book
+from moopython.order_book import read_order_book, visible_price_zones
 from moopython.stock_overview import build_overview
 
 
@@ -19,7 +19,7 @@ class StockOverviewTests(unittest.TestCase):
         self.assertAlmostEqual(result['rows'][0]['change_pct'],10)
         self.assertIsNone(result['rows'][1]['price'])
 
-    def test_order_book_reports_largest_visible_levels_and_missing_server_time(self):
+    def test_order_book_groups_neighboring_visible_prices_without_merging_distant_levels(self):
         class Context:
             def subscribe(self, codes, kinds, subscribe_push=False):
                 self.subscribed=(codes,kinds,subscribe_push)
@@ -37,9 +37,16 @@ class StockOverviewTests(unittest.TestCase):
         self.assertEqual(context.subscribed,(['US.AAPL'],['book'],False))
         self.assertEqual(result['status'],'ok')
         self.assertIsNone(result['bid_server_time'])
-        text=order_book_html(result)
-        self.assertLess(text.index('$99.99（200 股）'),text.index('$99.98（30 股）'))
-        self.assertIn('无法核对交易所更新时间',text)
+        zones=visible_price_zones(result,100.01)
+        self.assertEqual(len(zones['bids']),1)
+        self.assertEqual((zones['bids'][0]['low'],zones['bids'][0]['high']), (99.98,100))
+        self.assertEqual(zones['bids'][0]['volume'],240)
+        self.assertEqual(len(zones['asks']),1)
+        self.assertEqual(zones['asks'][0]['volume'],200)
+        distant=dict(result,bids=[dict(price=100,volume=10),dict(price=99.99,volume=20),
+                                  dict(price=99.50,volume=100)])
+        self.assertEqual([zone['volume'] for zone in visible_price_zones(distant,100.10)['bids']], [30,100])
+        self.assertEqual([zone['volume'] for zone in visible_price_zones(distant,99.40)['bids']], [100,30])
 
 
 if __name__ == '__main__': unittest.main()

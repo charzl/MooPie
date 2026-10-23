@@ -17,10 +17,23 @@ def signals_html(signals):
         content += (f'<p>{basis}：<b>${reference["price"]:,.2f}</b> · {time_label}：'
                     +escape(reference.get('time') or '报价未提供时间')+'</p>')
         content += '<p>日线截至 '+escape(signal['as_of'])+f' · 分析最近 {signal["lookback_bars"]} 根日线</p>'
+        cards = []
+        for field, title, background, foreground in (
+                ('support_zones', '下方潜在支撑', '#153527', '#a7f3c5'),
+                ('resistance_zones', '上方潜在阻力', '#482425', '#ffc1c1')):
+            zone = signal[field][0] if signal[field] else None
+            value = (f'${zone["low"]:,.2f}–${zone["high"]:,.2f}' if zone else '暂无已确认区间')
+            distance = (f'距区域边缘 {zone["distance_pct"]:.2f}%' if zone else '等待后续日线确认')
+            cards.append(f'<td width="50%" bgcolor="{background}" style="padding:12px;">'
+                         f'<p style="color:{foreground};font-size:13px;">{title}</p>'
+                         f'<p style="color:{foreground};font-size:21px;"><b>{value}</b></p>'
+                         f'<p style="color:{foreground};font-size:12px;">{distance}</p></td>')
+        content += '<table width="100%" cellspacing="8"><tr>'+''.join(cards)+'</tr></table>'
         for field, title in [('support_zones', '下方潜在支撑'), ('resistance_zones', '上方潜在阻力')]:
             content += '<h4>'+title+'</h4>'
             if not signal[field]:
-                content += '<p>当前历史范围内没有足够的转折依据，不推测具体价位。</p>'
+                direction = '下方的转折低点' if field == 'support_zones' else '上方的转折高点'
+                content += '<p>日线已通过验证；分析窗口内未找到位于参考价'+direction+'且已得到后续日线确认的区域，因此暂无可确认价位。</p>'
                 continue
             content += '<table cellspacing="0" cellpadding="8"><tr><th>价格区域</th><th>距区域边缘</th><th>历史转折证据</th></tr>'
             for zone in signal[field]:

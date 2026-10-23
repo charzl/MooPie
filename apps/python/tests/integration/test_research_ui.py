@@ -12,7 +12,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QDate, QProcess, QSettings, QTimer, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QFont, QRawFont
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar
 from moopython.research import load_rules
 from moopython.research_ui import ResearchWindow
 from moopython.research_controls import FilterDialog
@@ -327,6 +327,23 @@ class ResearchUiTests(unittest.TestCase):
         self.assertEqual(signal['status'], 'ok')
         self.assertEqual(PriceSignalStore().latest('US.TEST')['signal'], signal)
         self.assertIn('已保存到 SQLite', self.window.price_signal_result.toPlainText())
+
+    def test_order_book_chart_highlights_nearest_merged_bid_range(self):
+        book=dict(status='ok',depth=10,collected_at='2026-10-23T18:00:00+00:00',
+                  bid_server_time=None,ask_server_time=None,
+                  bids=[dict(price=100.00,volume=50),dict(price=99.98,volume=150),
+                        dict(price=99.96,volume=200),dict(price=99.70,volume=400)],
+                  asks=[dict(price=100.12,volume=20),dict(price=100.14,volume=80),
+                        dict(price=100.50,volume=300)])
+        chart=self.window.order_book_result
+        chart.set_book(book,dict(last_price=100.10),language='zh',theme='dark')
+        self.app.processEvents()
+        text=' '.join(label.text() for label in chart.findChildren(QLabel))
+        self.assertIn('最近买盘区间  $99.96–$100.00',text)
+        self.assertIn('可见 400 股 · 合并 3 档 · 距现价 0.10%',text)
+        self.assertIn('最近卖盘区间  $100.12–$100.14',text)
+        self.assertIn('并非全市场买卖总量',text)
+        self.assertEqual(len(chart.findChildren(QProgressBar)),4)
 
     def test_language_switch_is_instant_and_keeps_report_selection_and_saved_inputs(self):
         from moopython.research import analyze_put_dataset

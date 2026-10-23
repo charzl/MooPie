@@ -42,7 +42,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\moomoo.ps1 desktop
 
 安装脚本准备 Python 3.14 和项目依赖，无需手动激活虚拟环境。只用 CLI / MCP 时，省略 `--desktop` 或 `-Desktop`。
 
-打开界面，首页和左侧 Watchlist 只显示股票名、股价、涨跌；绿色表示上涨，红色表示下跌。悬停可查看报价时间。点击股票进入个股详情，查看日线支撑阻力、趋势及前十档可见买卖盘；支撑阻力及计算依据会保存到 SQLite，供以后查询历史变化。盘口时间缺失时会明确提示。右下角「更新行情」主动刷新。输入代码仍可筛选卖出 Put，原有 Top 5 / 10 / 20、Filter 和排序设置继续适用。详见[Watchlist](docs/guides/watchlists.md)与[数据库说明](docs/guides/database.md)。
+打开界面，首页和左侧 Watchlist 只显示股票名、股价、涨跌；绿色表示上涨，红色表示下跌。悬停可查看报价时间。点击股票进入个股详情，查看日线支撑阻力、趋势及合并相邻价位后的可见买卖盘图表；支撑阻力及计算依据会保存到 SQLite，供以后查询历史变化。盘口时间缺失时会明确提示。右下角「更新行情」主动刷新。输入代码仍可筛选卖出 Put，原有 Top 5 / 10 / 20、Filter 和排序设置继续适用。详见[Watchlist](docs/guides/watchlists.md)与[数据库说明](docs/guides/database.md)。
 
 关注名单保存在 SQLite。点「管理 Watchlist」可选中股票、删除，再点「确认保存」生效；取消则保留原名单。已有旧 JSON 会自动迁入一次，日常无需维护文件。
 

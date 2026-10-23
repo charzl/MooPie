@@ -1,6 +1,5 @@
 """Read and describe visible order-book depth for one stock on demand."""
 from datetime import datetime, timezone
-from html import escape
 from math import isfinite
 
 from .market_collection import opend_connection, us_symbols
@@ -42,27 +41,37 @@ def read_order_book(symbol, port=11111, depth=10):
         return unavailable(code, error)
 
 
-def order_book_html(book):
-    content = '<h2>买卖盘价位</h2>'
+def visible_price_zones(book, reference_price=None):
+    """Merge neighboring visible levels without treating them as marketwide orders."""
     if not book or book.get('status') != 'ok':
-        return content + '<p>盘口不可用：' + escape((book or {}).get('reason', '尚未查询')) + '</p>'
-    content += '<p>仅比较当前可见的前 '+str(book['depth'])+' 档挂单量；挂单可以撤销，不代表实际成交或有效支撑。</p>'
-    for field, label in (('bids', '买盘'), ('asks', '卖盘')):
-        largest = sorted((level for level in book[field] if level['volume'] > 0),
-                         key=lambda level: (-level['volume'], level['price']))[:3]
-        content += '<p><b>'+label+'主要价位：</b>' + (' · '.join(
-            f'${level["price"]:,.2f}（{level["volume"]:,.0f} 股）' for level in largest) if largest else '没有可见档位') + '</p>'
-    content += ('<p>采集时间（UTC）：'+escape(book['collected_at'])+'<br>买盘服务器时间：'
-                +escape(book.get('bid_server_time') or '未提供，无法核对交易所更新时间')
-                +' · 卖盘服务器时间：'+escape(book.get('ask_server_time') or '未提供，无法核对交易所更新时间')+'</p>')
-    for field, label in (('bids', '买盘'), ('asks', '卖盘')):
-        levels = book[field]
-        content += '<h3>'+label+'挂单量较集中的价位</h3>'
-        if not levels:
-            content += '<p>没有可见档位。</p>'
-            continue
-        content += '<table cellspacing="0" cellpadding="6"><tr><th>档位</th><th>价格</th><th>可见挂单量</th></tr>'
-        for index, level in enumerate(levels, 1):
-            content += f'<tr><td>{index}</td><td>${level["price"]:,.2f}</td><td>{level["volume"]:,.0f} 股</td></tr>'
-        content += '</table>'
-    return content
+        return dict(bids=[], asks=[])
+    if (type(reference_price) not in (int, float) or not isfinite(reference_price)
+            or reference_price <= 0):
+        reference_price = None
+    prices = [row['price'] for side in ('bids', 'asks') for row in book.get(side, [])]
+    scale = reference_price or (max(prices) if prices else 1.0)
+    maximum_gap = max(0.02, scale * 0.001)
+    maximum_span = max(0.05, scale * 0.003)
+    zones = {}
+    for side, descending in (('bids', True), ('asks', False)):
+        levels = sorted((row for row in book.get(side, []) if row['volume'] > 0),
+                        key=lambda row: row['price'], reverse=descending)
+        groups = []
+        for level in levels:
+            if (not groups or abs(level['price'] - groups[-1][-1]['price']) > maximum_gap
+                    or abs(level['price'] - groups[-1][0]['price']) > maximum_span):
+                groups.append([])
+            groups[-1].append(level)
+        items = []
+        for group in groups:
+            low = min(row['price'] for row in group)
+            high = max(row['price'] for row in group)
+            distance = max(low-reference_price, reference_price-high, 0) if reference_price else None
+            distance_pct = distance / reference_price * 100 if reference_price else None
+            items.append(dict(low=low, high=high, volume=sum(row['volume'] for row in group),
+                              levels=len(group), distance_pct=distance_pct))
+        if reference_price:
+            items.sort(key=lambda zone: (zone['distance_pct'],
+                                         -zone['high'] if side == 'bids' else zone['low']))
+        zones[side] = items
+    return zones

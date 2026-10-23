@@ -33,6 +33,7 @@ flowchart TD
 | 修改 Filter、指标、评分或趋势文字 | [put_rules.py](../../modules/put-screener/put_rules.py) | 唯一规则实现，标准库依赖，更新规则版本 |
 | 组合研究流程 | [research.py](../../apps/python/moopython/research.py) | 复用采集与规则；不依赖 Qt / MCP |
 | 独立价格信号 | [price_signals.py](../../apps/python/moopython/price_signals.py)、[price_signal_view.py](../../apps/python/moopython/price_signal_view.py) | 复用已验证日线识别潜在价位，单独展示；不写入现有排名、分数或 Filter，不将历史转折称为当前挂单 |
+| 可见买卖盘区间图 | [order_book.py](../../apps/python/moopython/order_book.py)、[order_book_chart.py](../../apps/python/moopython/order_book_chart.py) | 仅合并 OpenD 返回的相邻可见价位；标出最近区间与汇总数量，不推断全市场订单 |
 | 首页价格与个股盘口 | [stock_overview.py](../../apps/python/moopython/stock_overview.py)、[order_book.py](../../apps/python/moopython/order_book.py) | 首页按名单顺序显示报价和本地证券名称；点个股才订阅盘口，列出可见档位与时间，不推断实际成交方向 |
 | 股票名单与预检查 | [watchlist.py](../../apps/python/moopython/watchlist.py)、[watchlist_cli.py](../../apps/python/moopython/watchlist_cli.py) | 全名单格式和证券身份验证通过才分析，逐股保留结果与错误；复用独立规则 |
 | 桌面全名单研究与管理 | [watchlist_research.py](../../apps/python/moopython/watchlist_research.py)、[watchlist_store.py](../../apps/python/moopython/watchlist_store.py)、[watchlist_dialog.py](../../apps/python/moopython/watchlist_dialog.py) | 原始输入合并后调用同一规则；SQLite 成员表、旧 JSON 一次迁入、核验添加、暂存删除后确认 |

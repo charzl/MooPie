@@ -132,10 +132,14 @@ OpenD 端口	OpenD Port
 当前缺少明确的价格位置优势	No clear price-location advantage yet
 下方潜在支撑	Potential Support Below
 上方潜在阻力	Potential Resistance Above
+暂无已确认区间	No confirmed zone
+等待后续日线确认	Awaiting later daily bars
 价格区域	Price Zone
 距区域边缘	Distance to Zone Edge
 历史转折证据	Historical Pivot Evidence
 当前历史范围内没有足够的转折依据，不推测具体价位。	No sufficient pivot evidence in this history window; no level inferred.
+日线已通过验证；分析窗口内未找到位于参考价下方的转折低点且已得到后续日线确认的区域，因此暂无可确认价位。	Daily history is valid, but no pivot low below the reference price has been confirmed by later bars in this window; no support zone is reported.
+日线已通过验证；分析窗口内未找到位于参考价上方的转折高点且已得到后续日线确认的区域，因此暂无可确认价位。	Daily history is valid, but no pivot high above the reference price has been confirmed by later bars in this window; no resistance zone is reported.
 单次转折，依据有限	Single pivot; limited evidence
 多次转折	Repeated pivots
 下一步观察	What to Watch Next
