@@ -198,6 +198,26 @@ class ResearchUiTests(unittest.TestCase):
         self.window.symbol.setText('NVDA')
         self.assertNotIn(code,self.window.price_signal_result.toPlainText())
 
+    def test_buy_plan_and_alert_controls_use_detail_signal_and_temp_database(self):
+        signal = dict(symbol='US.TEST', status='ok', as_of='2026-10-23',
+                      support_zones=[dict(low=90, high=94)],
+                      resistance_zones=[dict(low=105, high=107)])
+        self.window.results['trend'] = dict(symbol='US.TEST', price_signals={'US.TEST': signal},
+                                            quote=dict(last_price=99, update_time='2026-10-26 09:30:00'))
+        self.window.plan_budget.setValue(3000)
+        self.window.plan_button.click()
+        self.assertIn('$94.00', self.window.plan_result.text())
+        self.assertIn('× 12 股', self.window.plan_result.text())
+        self.assertIn('约 $75.00', self.window.plan_result.text())
+        with patch.object(self.window, 'poll_buy_alerts'):
+            self.window.alert_button.click()
+        self.assertEqual(self.window.buy_alerts.get('US.TEST')['status'], 'watching')
+        self.window.pause_alert_button.click()
+        self.assertEqual(self.window.buy_alerts.get('US.TEST')['status'], 'paused')
+        self.window.change_language('en')
+        self.assertIn('Hypothetical stock plan', self.window.plan_result.text())
+        self.assertIn('Alert paused', self.window.alert_result.text())
+
     def test_watchlist_shows_only_name_price_change_and_colors_direction(self):
         from moopython.research import analyze_put_dataset
         self.window.watchlist._merge(['US.TEST','US.TESTB'],'test',replace=True)

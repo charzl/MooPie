@@ -12,7 +12,7 @@ from .research import analyze_put_dataset, run_research
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Single-stock or Watchlist research')
-    parser.add_argument('action', choices=['overview', 'put', 'trend', 'add', 'sync-directory'])
+    parser.add_argument('action', choices=['overview', 'put', 'trend', 'add', 'sync-directory', 'alerts'])
     parser.add_argument('symbol', nargs='?')
     parser.add_argument('--watchlist', type=Path, help='Research this JSON instead of the database Watchlist; read-only input')
     parser.add_argument('--port', type=int, default=11111)
@@ -34,6 +34,22 @@ def main(argv=None):
         elif output_stream is not None: print(document,file=output_stream)
     if sys.stderr is None: sys.stderr = open(os.devnull, 'w', encoding='utf-8')
     try:
+        if args.action == 'alerts':
+            if args.symbol or args.input or args.watchlist or args.config or args.depth:
+                raise ValueError('alerts polls armed stocks from SQLite only')
+            from .buy_alert_store import BuyAlertStore
+            alerts = BuyAlertStore()
+            symbols = alerts.active_symbols()
+            rows = []
+            if symbols:
+                with redirect_stdout(sys.stderr):
+                    with market_data_connection(port=args.port, refresh=True) as service:
+                        quote_rows = service.snapshots(symbols)['rows']
+                for quote in quote_rows:
+                    record, event = alerts.observe(quote['code'], quote, with_event=True)
+                    if record: rows.append(dict(symbol=quote['code'], quote=quote, alert=record, event=event))
+            emit(dict(action='alerts', rows=rows))
+            return 0
         if args.depth and (args.action != 'trend' or not args.symbol):
             raise ValueError('--depth requires a single-stock trend query')
         def attach_depth(result):

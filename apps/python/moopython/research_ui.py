@@ -8,7 +8,7 @@ import tempfile
 from PySide6.QtCore import QProcess, QProcessEnvironment, QSettings, QTimer, Qt, QSize
 from PySide6.QtGui import QFontDatabase, QAction, QActionGroup, QColor, QPalette
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QFileDialog, QMessageBox,
+    QLabel, QLineEdit, QPushButton, QTextBrowser, QSpinBox, QDoubleSpinBox, QFileDialog, QMessageBox,
     QDialog, QComboBox, QTabWidget, QFrame, QToolButton, QMenu, QListWidget,
     QListWidgetItem, QWidgetAction, QSplitter, QStackedWidget, QTableWidget,
     QTableWidgetItem, QAbstractItemView, QHeaderView, QStyledItemDelegate, QStyleOptionViewItem)
@@ -23,6 +23,8 @@ from .watchlist_store import WatchlistStore
 from .symbol_search import SymbolSuggestions
 from .watchlist_dialog import WatchlistDialog
 from .price_signal_view import signals_html
+from .buy_plan import calculate_plan
+from .buy_alert_store import BuyAlertStore
 from .security_directory import SecurityDirectory
 from .order_book_chart import OrderBookChart
 from .desktop_preferences import DesktopPreferences
@@ -72,6 +74,8 @@ class ResearchWindow(QMainWindow):
         self.put_dataset = None
         self.watchlist_quotes = {}
         self.watchlist = WatchlistStore()
+        self.buy_alerts = BuyAlertStore()
+        self.alert_process = None
         try:
             saved_config = self.settings.value('put_recommendation_configuration_v1', '')
             self.configuration = load_rules().recommendation_configuration(json.loads(saved_config) if saved_config else None)
@@ -276,6 +280,32 @@ class ResearchWindow(QMainWindow):
         technical_header = QHBoxLayout(); technical_header.addWidget(QLabel('个股依据 · 支撑阻力、买卖盘与趋势'))
         technical_header.addStretch(); technical_header.addWidget(self.trend_button)
         technical_layout.addLayout(technical_header)
+        plan_controls = QHBoxLayout()
+        plan_controls.addWidget(QLabel('计划投入 $'))
+        self.plan_budget = QDoubleSpinBox()
+        self.plan_budget.setRange(1, 1000000000)
+        self.plan_budget.setDecimals(2)
+        self.plan_budget.setValue(3000)
+        self.plan_budget.setSingleStep(100)
+        plan_controls.addWidget(self.plan_budget)
+        self.plan_button = QPushButton('计算分批计划')
+        self.plan_button.clicked.connect(self.calculate_buy_plan)
+        plan_controls.addWidget(self.plan_button)
+        self.alert_button = QPushButton('开启买点提醒')
+        self.alert_button.clicked.connect(self.arm_buy_alert)
+        plan_controls.addWidget(self.alert_button)
+        self.pause_alert_button = QPushButton('暂停提醒')
+        self.pause_alert_button.clicked.connect(self.pause_buy_alert)
+        plan_controls.addWidget(self.pause_alert_button)
+        plan_controls.addStretch()
+        technical_layout.addLayout(plan_controls)
+        self.plan_result = QLabel('选择个股后，可按已确认支撑区计算假设计划。')
+        self.plan_result.setWordWrap(True)
+        self.plan_result.setObjectName('muted')
+        technical_layout.addWidget(self.plan_result)
+        self.alert_result = QLabel('提醒仅在 MooPie 开启且 OpenD 可用时检查新报价。')
+        self.alert_result.setWordWrap(True)
+        technical_layout.addWidget(self.alert_result)
         technical_content = QSplitter(Qt.Orientation.Vertical)
         price_and_depth = QSplitter(Qt.Orientation.Horizontal)
         price_and_depth.addWidget(self.price_signal_result)
@@ -321,6 +351,10 @@ class ResearchWindow(QMainWindow):
         self.ui.root = self
         self.candidate_table.ui = self.ui
         self.ui.apply_theme()
+        self.alert_timer = QTimer(self)
+        self.alert_timer.setInterval(60000)
+        self.alert_timer.timeout.connect(self.poll_buy_alerts)
+        self.alert_timer.start()
         if auto_load: QTimer.singleShot(0, self.initial_watchlist)
 
     def initial_watchlist(self):
@@ -339,6 +373,11 @@ class ResearchWindow(QMainWindow):
     def change_language(self, value):
         self.ui.set_language(value)
         self.update_watchlist_label()
+        current = self.results.get('trend', {}).get('symbol')
+        if current:
+            self.calculate_buy_plan()
+            try: self.show_alert_state(self.buy_alerts.get(current))
+            except (OSError, RuntimeError): pass
         if self.order_book_result.book:
             self.order_book_result.set_book(self.order_book_result.book, self.order_book_result.quote,
                                             language=value, theme=self.ui.effective_theme)
@@ -346,6 +385,10 @@ class ResearchWindow(QMainWindow):
     def change_theme(self, value):
         self.ui.set_theme(value)
         self.update_watchlist_label()
+        current = self.results.get('trend', {}).get('symbol')
+        if current:
+            try: self.show_alert_state(self.buy_alerts.get(current))
+            except (OSError, RuntimeError): pass
         if self.order_book_result.book:
             self.order_book_result.set_book(self.order_book_result.book, self.order_book_result.quote,
                                             language=self.ui.language, theme=self.ui.effective_theme)
@@ -365,6 +408,139 @@ class ResearchWindow(QMainWindow):
         self.symbol.setText(code.removeprefix('US.'))
         self.analysis_stack.setCurrentIndex(1)
         self.start('trend', depth=True)
+
+    def current_buy_signal(self):
+        result = self.results.get('trend', {})
+        return result.get('price_signals', {}).get(result.get('symbol'))
+
+    def calculate_buy_plan(self):
+        try:
+            plan = calculate_plan(self.current_buy_signal(), self.plan_budget.value())
+        except ValueError as error:
+            self.ui.set_text(self.plan_result, str(error))
+            return
+        if self.ui.language == 'en':
+            cells = ''.join(f'<td width="33%"><b>Tranche {index} · {weight}%</b><br>'
+                            f'<span style="font-size:17px">${row["price"]:,.2f}</span> × {row["shares"]} shares</td>'
+                            for index, (weight, row) in enumerate(zip((40, 30, 30), plan['tranches']), 1))
+            target = (f'Nearest resistance ${plan["resistance"]:,.2f}; paper gain at that price ${plan["target_gain"]:,.2f}'
+                      if plan['resistance'] is not None else 'No confirmed resistance above; target not estimated')
+            self.plan_result.setText(
+                '<h3 style="margin:2px 0">Hypothetical stock plan</h3><table width="100%" cellpadding="5"><tr>' + cells + '</tr></table>'
+                f'<p>All filled: {plan["shares"]} shares · Cost ${plan["cost"]:,.2f} · Unused ${plan["unused"]:,.2f}. '
+                f'Support floor ${plan["stop"]:,.2f}; paper loss at that price about ${plan["max_loss_to_stop"]:,.2f}; {target}.</p>'
+                '<p style="color:#9c6920">Later tranches assume a retest with support intact. Fees, slippage and gaps are excluded; losses can be larger.</p>')
+            return
+        cells = ''.join(f'<td width="33%"><b>第 {index} 批 · {weight}%</b><br>'
+                        f'<span style="font-size:17px">${row["price"]:,.2f}</span> × {row["shares"]} 股</td>'
+                        for index, (weight, row) in enumerate(zip((40, 30, 30), plan['tranches']), 1))
+        target = (f'上方阻力 ${plan["resistance"]:,.2f}，至该价账面空间 ${plan["target_gain"]:,.2f}'
+                  if plan['resistance'] is not None else '上方暂无已确认阻力，无法估算目标空间')
+        self.plan_result.setText(
+            '<h3 style="margin:2px 0">假设买入计划</h3><table width="100%" cellpadding="5"><tr>' + cells + '</tr></table>'
+            f'<p>全部成交：{plan["shares"]} 股 · 成本 ${plan["cost"]:,.2f} · 未用 ${plan["unused"]:,.2f}。'
+            f'支撑下沿 ${plan["stop"]:,.2f}，跌至该价账面亏损约 ${plan["max_loss_to_stop"]:,.2f}；{target}。</p>'
+            '<p style="color:#9c6920">后两批仅考虑支撑有效时的回踩；未计费用、滑点或跳空，跌破支撑可能损失更多。</p>')
+
+    def show_alert_state(self, record):
+        if not record:
+            self.alert_result.setStyleSheet('')
+            self.ui.set_text(self.alert_result, '提醒未开启；仅在 MooPie 开启且 OpenD 可用时检查新报价。')
+            return
+        labels = ({'watching': 'Waiting for price to enter support',
+                   'inside': 'Inside support; waiting for a later quote above its upper edge',
+                   'confirmed': 'Condition observed: entered support, then reclaimed its upper edge; review before acting',
+                   'invalidated': 'Condition invalid: price fell below support', 'paused': 'Alert paused'}
+                  if self.ui.language == 'en' else
+                  {'watching': '等待价格进入支撑区', 'inside': '已进入支撑区，等待后续新报价重新站上区间上沿',
+                   'confirmed': '条件已出现：先入支撑区，后重新站上上沿；请自行复核',
+                   'invalidated': '条件失效：价格跌破支撑下沿', 'paused': '提醒已暂停'})
+        color = ({'inside': '#d5a031', 'confirmed': '#48d67f', 'invalidated': '#ff7777'}
+                 if self.ui.effective_theme == 'dark' else
+                 {'inside': '#8e6000', 'confirmed': '#167a3e', 'invalidated': '#bd3030'})
+        self.alert_result.setStyleSheet('color: '+color[record['status']]+';' if record['status'] in color else '')
+        if self.ui.language == 'en':
+            self.alert_result.setText(
+                f'Buy-point alert: {labels[record["status"]]}. Zone ${record["support_low"]:,.2f}–${record["support_high"]:,.2f}'
+                f' (daily bars through {record["signal_as_of"]}); last quote {record["last_quote_time"] or "time unavailable"} (New York).')
+        else:
+            self.alert_result.setText(
+                f'买点提醒：{labels[record["status"]]}。监控区 ${record["support_low"]:,.2f}–${record["support_high"]:,.2f}'
+                f'（日线截至 {record["signal_as_of"]}）；最近报价 {record["last_quote_time"] or "未提供时间"}（纽约）。')
+
+    def show_buy_plan_context(self, result):
+        self.calculate_buy_plan()
+        symbol = result.get('symbol')
+        if not symbol: return
+        try:
+            if result.get('quote'):
+                record, event = self.buy_alerts.observe(symbol, result['quote'], with_event=True)
+            else:
+                record, event = self.buy_alerts.get(symbol), False
+            self.show_alert_state(record)
+            if event:
+                QMessageBox.information(self, self.ui.translate('买点条件更新'), symbol + '：' + self.alert_result.text())
+        except (OSError, RuntimeError, ValueError) as error:
+            self.alert_result.setText('读取买点提醒失败：' + str(error))
+
+    def arm_buy_alert(self):
+        signal = self.current_buy_signal()
+        try:
+            result = self.results.get('trend', {})
+            record = self.buy_alerts.arm(signal, result.get('quote'))
+            self.show_alert_state(record)
+            self.poll_buy_alerts()
+        except (OSError, RuntimeError, ValueError, TypeError) as error:
+            self.alert_result.setText(str(error))
+
+    def pause_buy_alert(self):
+        result = self.results.get('trend', {})
+        symbol = result.get('symbol')
+        if not symbol: return
+        try: self.show_alert_state(self.buy_alerts.pause(symbol))
+        except (OSError, RuntimeError, ValueError) as error: self.alert_result.setText(str(error))
+
+    def poll_buy_alerts(self):
+        if self.alert_process is not None: return
+        try:
+            if not self.buy_alerts.active_symbols(): return
+        except (OSError, RuntimeError): return
+        path = Path(self.workspace.name) / 'alerts.json'
+        path.unlink(missing_ok=True)
+        process = QProcess(self)
+        self.alert_process = process
+        process.finished.connect(lambda code, _status: self.alert_poll_finished(code, path))
+        process.errorOccurred.connect(lambda error: self.alert_poll_error(error))
+        args = (['research'] if getattr(sys, 'frozen', False) else ['-X', 'utf8', '-m', 'moopython.research_cli'])
+        process.start(sys.executable, [*args, 'alerts', '--port', str(self.port.value()), '--output', str(path)])
+
+    def alert_poll_error(self, error):
+        if error == QProcess.ProcessError.FailedToStart:
+            self.alert_result.setText('买点提醒查询未启动：' + self.alert_process.errorString())
+            self.alert_process.deleteLater(); self.alert_process = None
+
+    def alert_poll_finished(self, exit_code, path):
+        process = self.alert_process
+        if process is None: return
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+            if exit_code or payload.get('error'):
+                raise ValueError(payload.get('error', f'查询进程退出：{exit_code}'))
+            current = self.results.get('trend', {}).get('symbol')
+            for row in payload.get('rows', []):
+                if row['symbol'] == current: self.show_alert_state(row['alert'])
+                if row.get('event'):
+                    message = (('Reclaimed the support zone upper edge; review the current quote.'
+                                if row['alert']['status'] == 'confirmed' else
+                                'Fell below the support zone; the original condition is invalid.')
+                               if self.ui.language == 'en' else
+                               ('已重新站上支撑区上沿，请自行复核。' if row['alert']['status'] == 'confirmed'
+                                else '已跌破支撑区下沿，原条件失效。'))
+                    QMessageBox.information(self, self.ui.translate('买点条件更新'), row['symbol'] + '：' + message)
+        except (OSError, ValueError, KeyError) as error:
+            self.alert_result.setText('买点提醒本次未能检查：' + str(error))
+        finally:
+            process.deleteLater(); self.alert_process = None
 
     def open_overview_row(self, row, _column):
         item = self.overview_table.item(row, 0)
@@ -461,6 +637,9 @@ class ResearchWindow(QMainWindow):
         self.ui.set_text(self.scope_heading,'分析 · '+(self.symbol.text().strip().upper() or 'Watchlist'))
         self.ui.set_text(self.price_signal_result, signals_html({}), 'setHtml')
         self.order_book_result.set_book(None, language=self.ui.language, theme=self.ui.effective_theme)
+        self.ui.set_text(self.plan_result, '选择个股后，可按已确认支撑区计算假设计划。')
+        self.alert_result.setStyleSheet('')
+        self.ui.set_text(self.alert_result, '提醒仅在 MooPie 开启且 OpenD 可用时检查新报价。')
         self.clear_candidates('输入代码搜索单股，或留空查看默认 Watchlist。')
         self.ui.set_text(self.put_result, f'<h2>卖出 Put · Top {self.top_count.currentData()}</h2><p>先按 Filter 过滤，再按到期时长、担保成本、收益、风险或综合得分排序。</p><p style="color:#9aaab7">点击表头切换排序方向；设置页调整 Filter 和评分参数。</p>', 'setHtml')
         self.ui.set_text(self.trend_result, '<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>', 'setHtml')
@@ -668,6 +847,8 @@ class ResearchWindow(QMainWindow):
         self.ui.set_text(self.price_signal_result, signal_view, 'setHtml')
         self.order_book_result.set_book(result.get('order_book'), result.get('quote'),
                                         language=self.ui.language, theme=self.ui.effective_theme)
+        if action == 'trend':
+            self.show_buy_plan_context(result)
         heading = f'<h2>{esc(result["symbol"])} · {"卖出 Put" if action == "put" else "走势"}</h2>'
         if action == 'trend':
             content = (''.join('<h2>' + esc(item['symbol']) + '</h2>' + trend_html(item) for item in result['items'])
@@ -819,6 +1000,9 @@ class ResearchWindow(QMainWindow):
             except OSError as error: QMessageBox.warning(self, self.ui.translate('导出失败'), str(error))
 
     def closeEvent(self, event):
+        self.alert_timer.stop()
+        if self.alert_process:
+            self.alert_process.kill(); self.alert_process.waitForFinished(2000)
         self.symbol_search.shutdown()
         self.paper_panel.shutdown()
         if self.process:

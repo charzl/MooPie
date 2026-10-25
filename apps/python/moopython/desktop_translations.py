@@ -610,6 +610,20 @@ CATALOG += '''
 固定资金不自动补资，现金不足时等额缩小新买单。单股投入决定策略资金利用率；QQQ / SPY 以各自本金建仓。	Fixed capital never adds funds; new buys share available cash when needed. Per-stock budgets determine strategy exposure; QQQ / SPY invest their respective starting capital.
 '''
 
+CATALOG += '''
+计划投入 $	Planned amount $
+计算分批计划	Calculate staged plan
+开启买点提醒	Enable buy-point alert
+暂停提醒	Pause alert
+选择个股后，可按已确认支撑区计算假设计划。	Select a stock to calculate a hypothetical plan from its confirmed support zone.
+提醒仅在 MooPie 开启且 OpenD 可用时检查新报价。	Alerts check new quotes only while MooPie is open and OpenD is available.
+提醒未开启；仅在 MooPie 开启且 OpenD 可用时检查新报价。	Alert is off. New quotes are checked only while MooPie is open and OpenD is available.
+暂无已确认的下方支撑区，不能自动生成买入计划	No confirmed support below the price; an automatic plan cannot be calculated.
+暂无已确认的下方支撑区，无法设置提醒	No confirmed support below the price; an alert cannot be armed.
+按当前分批比例，金额不足以购买一股；请增加投入金额	At these tranche sizes, the amount cannot buy one whole share. Increase the amount.
+买点条件更新	Buy-point condition update
+'''
+
 TRANSLATIONS=dict(line.split('\t',1) for line in CATALOG.strip().splitlines() if '\t' in line)
 # One pass prevents translated output from being translated again. Single Chinese
 # characters are translated only as whole values, never inside company names.
