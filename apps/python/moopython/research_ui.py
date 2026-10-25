@@ -306,6 +306,9 @@ class ResearchWindow(QMainWindow):
         self.alert_result = QLabel('提醒仅在 MooPie 开启且 OpenD 可用时检查新报价。')
         self.alert_result.setWordWrap(True)
         technical_layout.addWidget(self.alert_result)
+        self.timeframe_summary = QLabel('周线与月线价位会在个股分析后显示。')
+        self.timeframe_summary.setWordWrap(True)
+        technical_layout.addWidget(self.timeframe_summary)
         technical_content = QSplitter(Qt.Orientation.Vertical)
         price_and_depth = QSplitter(Qt.Orientation.Horizontal)
         price_and_depth.addWidget(self.price_signal_result)
@@ -376,6 +379,7 @@ class ResearchWindow(QMainWindow):
         current = self.results.get('trend', {}).get('symbol')
         if current:
             self.calculate_buy_plan()
+            self.show_timeframe_summary(self.current_buy_signal() or {})
             try: self.show_alert_state(self.buy_alerts.get(current))
             except (OSError, RuntimeError): pass
         if self.order_book_result.book:
@@ -468,8 +472,32 @@ class ResearchWindow(QMainWindow):
                 f'买点提醒：{labels[record["status"]]}。监控区 ${record["support_low"]:,.2f}–${record["support_high"]:,.2f}'
                 f'（日线截至 {record["signal_as_of"]}）；最近报价 {record["last_quote_time"] or "未提供时间"}（纽约）。')
 
+    def show_timeframe_summary(self, signal):
+        multi = signal.get('multi_timeframe', {})
+        if multi.get('status') == 'ok':
+            labels = (('Weekly', 'Monthly') if self.ui.language == 'en' else ('周线', '月线'))
+            parts = []
+            for label, period in zip(labels, ('week', 'month')):
+                item = multi['periods'][period]
+                if item.get('status') != 'ok':
+                    parts.append(f'<b>{label}</b>：{esc(self.ui.translate(item.get("reason", "数据不足")))}')
+                    continue
+                support = item.get('support_zones', [])
+                resistance = item.get('resistance_zones', [])
+                support_price = (f'${support[0]["low"]:,.2f}–${support[0]["high"]:,.2f}' if support else '—')
+                resistance_price = (f'${resistance[0]["low"]:,.2f}–${resistance[0]["high"]:,.2f}' if resistance else '—')
+                lower = 'Support' if self.ui.language == 'en' else '支撑'
+                upper = 'Resistance' if self.ui.language == 'en' else '阻力'
+                parts.append(f'<b>{label}</b> ({esc(item["as_of"])})：'
+                             f'<span style="color:#32b873">{lower} {support_price}</span> · '
+                             f'<span style="color:#e26060">{upper} {resistance_price}</span>')
+            self.timeframe_summary.setText('<br>'.join(parts))
+        else:
+            self.ui.set_text(self.timeframe_summary, '周线 / 月线价位暂不可用。')
+
     def show_buy_plan_context(self, result):
         self.calculate_buy_plan()
+        self.show_timeframe_summary(self.current_buy_signal() or {})
         symbol = result.get('symbol')
         if not symbol: return
         try:
@@ -640,6 +668,7 @@ class ResearchWindow(QMainWindow):
         self.ui.set_text(self.plan_result, '选择个股后，可按已确认支撑区计算假设计划。')
         self.alert_result.setStyleSheet('')
         self.ui.set_text(self.alert_result, '提醒仅在 MooPie 开启且 OpenD 可用时检查新报价。')
+        self.ui.set_text(self.timeframe_summary, '周线与月线价位会在个股分析后显示。')
         self.clear_candidates('输入代码搜索单股，或留空查看默认 Watchlist。')
         self.ui.set_text(self.put_result, f'<h2>卖出 Put · Top {self.top_count.currentData()}</h2><p>先按 Filter 过滤，再按到期时长、担保成本、收益、风险或综合得分排序。</p><p style="color:#9aaab7">点击表头切换排序方向；设置页调整 Filter 和评分参数。</p>', 'setHtml')
         self.ui.set_text(self.trend_result, '<h2>走势分析</h2><p>均线 · RSI · MACD · 成交量</p><p style="color:#9aaab7">显示趋势、关键价位和改判条件。数据来自已完成日线。</p>', 'setHtml')

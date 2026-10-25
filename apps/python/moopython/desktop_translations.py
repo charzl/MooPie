@@ -624,6 +624,35 @@ CATALOG += '''
 买点条件更新	Buy-point condition update
 '''
 
+CATALOG += '''
+周线 / 月线参考	Weekly / Monthly Levels
+多周期价位不可用	Multi-period levels unavailable
+数据不完整	Incomplete data
+日线、周线与月线价位	Daily, Weekly and Monthly Levels
+周 / 月周期由同一批已验证日线汇总，未结束的周期不参与确认。	Weekly and monthly bars are aggregated from validated daily bars; unfinished periods are excluded.
+周期	Period
+下方支撑	Support Below
+上方阻力	Resistance Above
+周线	Weekly
+月线	Monthly
+支撑区间重叠	Overlapping Support Zones
+日线与周线	Daily and Weekly
+日线与月线	Daily and Monthly
+周线与月线	Weekly and Monthly
+未观察到	None observed
+仅表示价格区间相交，不代表更高胜率。	This only means price ranges intersect; it does not imply a higher win rate.
+已结束周期只有	Completed periods available:
+根，至少需要 15 根以计算 ATR	bars; at least 15 are needed for ATR
+日线信号不可用	Daily signal unavailable
+日线与价格信号不一致	Daily history does not match the price signal
+决策时间缺少时区	Decision time has no timezone
+参考价格无效	Invalid reference price
+支撑阻力已保存到 SQLite	Support and resistance saved to SQLite
+计算时间	Calculated at
+周线与月线价位会在个股分析后显示。	Weekly and monthly levels appear after stock analysis.
+周线 / 月线价位暂不可用。	Weekly / monthly levels are unavailable.
+'''
+
 TRANSLATIONS=dict(line.split('\t',1) for line in CATALOG.strip().splitlines() if '\t' in line)
 # One pass prevents translated output from being translated again. Single Chinese
 # characters are translated only as whole values, never inside company names.

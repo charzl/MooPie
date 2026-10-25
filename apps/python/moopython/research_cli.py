@@ -56,6 +56,7 @@ def main(argv=None):
             if args.depth:
                 from .order_book import read_order_book
                 from .price_signals import price_position, unavailable
+                from .timeframe_levels import timeframe_levels
                 from .price_signal_store import PriceSignalStore
                 from .market_collection import us_symbols
                 code = us_symbols([args.symbol])[0]
@@ -65,9 +66,14 @@ def main(argv=None):
                         quote = next(row for row in service.snapshots([code])['rows'] if row['code'] == code)
                         result['quote'] = quote
                         if result.get('trend', {}).get('status') == 'ok':
-                            series = next(row for row in service.daily_bars([code])['daily_series'] if row['symbol'] == code)
-                            result['price_signals'] = {code: price_position(series, result['trend'], reference=dict(
-                                price=quote['last_price'], time=quote.get('update_time'), basis='underlying_snapshot'))}
+                            daily = service.daily_bars([code])
+                            series = next(row for row in daily['daily_series'] if row['symbol'] == code)
+                            signal = price_position(series, result['trend'], reference=dict(
+                                price=quote['last_price'], time=quote.get('update_time'), basis='underlying_snapshot'))
+                            if signal['status'] == 'ok':
+                                signal['multi_timeframe'] = timeframe_levels(
+                                    series, signal, daily.get('decision_cutoff') or daily.get('fetched_at'))
+                            result['price_signals'] = {code: signal}
                 except Exception as error:
                     result['quote_error'] = str(error)
                     if result.get('trend', {}).get('status') != 'ok':

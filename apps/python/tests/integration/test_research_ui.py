@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -345,8 +346,16 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('trend', self.window.results, self.window.trend_result.toPlainText())
         signal = self.window.results['trend']['price_signals']['US.TEST']
         self.assertEqual(signal['status'], 'ok')
+        self.assertEqual(signal['multi_timeframe']['status'], 'ok')
+        self.assertIn('日线、周线与月线价位', self.window.price_signal_result.toPlainText())
+        self.assertIn('周线', self.window.timeframe_summary.text())
         self.assertEqual(PriceSignalStore().latest('US.TEST')['signal'], signal)
         self.assertIn('已保存到 SQLite', self.window.price_signal_result.toPlainText())
+        self.window.change_language('en')
+        self.assertFalse(re.search('[\u4e00-\u9fff]', self.window.timeframe_summary.text()))
+        translated = self.window.price_signal_result.toPlainText()
+        remaining = re.search('[\u4e00-\u9fff]', translated)
+        self.assertIsNone(remaining, translated[remaining.start()-80:remaining.start()+80] if remaining else '')
 
     def test_order_book_chart_highlights_nearest_merged_bid_range(self):
         book=dict(status='ok',depth=10,collected_at='2026-10-23T18:00:00+00:00',

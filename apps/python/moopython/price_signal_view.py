@@ -2,6 +2,47 @@
 from html import escape
 
 
+def _zone_price(zones):
+    if not zones: return '暂无已确认区间'
+    zone = zones[0]
+    return f'${zone["low"]:,.2f}–${zone["high"]:,.2f}'
+
+
+def _overlap(left, right):
+    return bool(left and right and max(left[0]['low'], right[0]['low']) <=
+                min(left[0]['high'], right[0]['high']))
+
+
+def _multi_timeframe_html(signal):
+    multi = signal.get('multi_timeframe')
+    if not multi: return ''
+    if multi.get('status') != 'ok':
+        return '<h3>周线 / 月线参考</h3><p>多周期价位不可用：'+escape(multi.get('reason', '数据不完整'))+'</p>'
+    content = '<h3>日线、周线与月线价位</h3>'
+    content += '<p>周 / 月周期由同一批已验证日线汇总，未结束的周期不参与确认。</p>'
+    content += '<table width="100%" cellspacing="0" cellpadding="8"><tr><th>周期</th><th>下方支撑</th><th>上方阻力</th><th>数据截至</th></tr>'
+    periods = [('日线', signal), ('周线', multi['periods']['week']), ('月线', multi['periods']['month'])]
+    for label, item in periods:
+        if item.get('status') != 'ok':
+            content += '<tr><td>'+label+'</td><td colspan="3">'+escape(item.get('reason', '数据不足'))+'</td></tr>'
+            continue
+        content += ('<tr><td><b>'+label+'</b></td>'
+                    '<td><span style="color:#32b873"><b>'+_zone_price(item['support_zones'])+'</b></span></td>'
+                    '<td><span style="color:#e26060"><b>'+_zone_price(item['resistance_zones'])+'</b></span></td>'
+                    '<td>'+escape(item['as_of'])+'</td></tr>')
+    content += '</table>'
+    aligned = []
+    for label, item in periods[1:]:
+        if item.get('status') == 'ok' and _overlap(signal['support_zones'], item['support_zones']):
+            aligned.append('日线与'+label)
+    if (multi['periods']['week'].get('status') == 'ok' and multi['periods']['month'].get('status') == 'ok'
+            and _overlap(multi['periods']['week']['support_zones'], multi['periods']['month']['support_zones'])):
+        aligned.append('周线与月线')
+    content += ('<p><b>支撑区间重叠：</b>'+('、'.join(aligned) if aligned else '未观察到')
+                +'。仅表示价格区间相交，不代表更高胜率。</p>')
+    return content
+
+
 def signals_html(signals):
     content = '<h2>价格位置与择时信号</h2><p>独立展示，暂不参与 Filter、收益分、风险分、综合分或排序。</p>'
     if not signals:
@@ -29,6 +70,7 @@ def signals_html(signals):
                          f'<p style="color:{foreground};font-size:21px;"><b>{value}</b></p>'
                          f'<p style="color:{foreground};font-size:12px;">{distance}</p></td>')
         content += '<table width="100%" cellspacing="8"><tr>'+''.join(cards)+'</tr></table>'
+        content += _multi_timeframe_html(signal)
         for field, title in [('support_zones', '下方潜在支撑'), ('resistance_zones', '上方潜在阻力')]:
             content += '<h4>'+title+'</h4>'
             if not signal[field]:
