@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QProgressBar,
                                QScrollArea, QVBoxLayout, QWidget)
 
-from .order_book import visible_price_zones
+from .order_book import quote_reference, visible_price_zones
 
 
 def price_range(zone):
@@ -71,9 +71,19 @@ class OrderBookChart(QScrollArea):
             self._label(('Unavailable: ' if english else '盘口不可用：') + str(reason))
             self.body.addStretch()
             return
-        price = (quote or {}).get('last_price')
-        if type(price) not in (int, float) or not isfinite(price) or price <= 0:
-            price = None
+        reference = quote_reference(quote)
+        price = reference['price']
+        labels = ({'regular': 'regular-session last price', 'after': 'after-hours price',
+                   'pre': 'pre-market price', 'overnight': 'overnight price'} if english else
+                  {'regular': '常规时段最新成交价', 'after': '盘后参考价',
+                   'pre': '盘前参考价', 'overnight': '夜盘参考价'})
+        last = (quote or {}).get('last_price')
+        if price is not None:
+            comparison = f'{labels[reference["session"]]} ${price:,.2f}'
+            if reference['session'] != 'regular' and type(last) in (int, float) and isfinite(last) and last > 0:
+                comparison = (f'Regular-session last price ${last:,.2f} · ' if english else
+                              f'常规时段 last_price ${last:,.2f} · ') + comparison
+            self._label(comparison)
         zones = visible_price_zones(book, price)
         for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
                             ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
@@ -81,8 +91,9 @@ class OrderBookChart(QScrollArea):
             title = ('Nearest visible bid range' if side == 'bids' else 'Nearest visible ask range') if english else (
                 '最近买盘区间' if side == 'bids' else '最近卖盘区间')
             if nearest:
-                distance = (f' · {nearest["distance_pct"]:.2f}% from price' if english else
-                            f' · 距现价 {nearest["distance_pct"]:.2f}%') if nearest['distance_pct'] is not None else ''
+                reference_name = labels[reference['session']]
+                distance = (f' · {nearest["distance_pct"]:.2f}% from {reference_name}' if english else
+                            f' · 距{reference_name} {nearest["distance_pct"]:.2f}%') if nearest['distance_pct'] is not None else ''
                 value = f'{title}  {price_range(nearest)}'
                 label = self._label(value, large=True)
                 label.setStyleSheet(f'color:{color};font-size:18px;font-weight:bold;')
@@ -115,12 +126,12 @@ class OrderBookChart(QScrollArea):
         collected = book.get('collected_at') or ('Unavailable' if english else '未提供')
         self._label(('Collected (UTC): ' if english else '盘口采集（UTC）：') + collected, muted=True)
         if (quote or {}).get('update_time'):
-            self._label(('Quote time (New York): ' if english else '最新价时间（纽约）：')
+            self._label(('Snapshot update (New York): ' if english else '快照更新时间（纽约）：')
                         + str(quote['update_time']), muted=True)
         if price and ((zones['bids'] and zones['bids'][0]['low'] > price) or
                       (zones['asks'] and zones['asks'][0]['high'] < price)):
-            self._label('Quote and order book may be out of sync.' if english else
-                        '报价与盘口价位可能不同步，请核对更新时间。', muted=True)
+            self._label('The selected trade price is outside the nearest book ranges; quote and depth may differ in time or session.' if english else
+                        '所选时段参考价落在最近盘口区间外；报价与盘口可能来自不同时间或时段。', muted=True)
         if not book.get('bid_server_time') or not book.get('ask_server_time'):
             self._label('Exchange update time unavailable; freshness cannot be verified.' if english else
                         '交易所更新时间未提供，无法核对盘口时效。', muted=True)

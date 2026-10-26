@@ -3,11 +3,21 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from moopython.order_book import read_order_book, visible_price_zones
+from moopython.order_book import quote_reference, read_order_book, visible_price_zones
 from moopython.stock_overview import build_overview
 
 
 class StockOverviewTests(unittest.TestCase):
+    def test_order_book_uses_session_price_without_replacing_regular_last_price(self):
+        quote = dict(last_price=216, after_price=216.4288, pre_price=211,
+                     update_time='2026-10-26 17:45:57.947')
+        self.assertEqual(quote_reference(quote), dict(price=216.4288, field='after_price',
+                                                      session='after', update_time=quote['update_time']))
+        self.assertEqual(quote['last_price'], 216)
+        self.assertEqual(quote_reference(dict(quote, update_time='2026-10-26 10:00:00'))['price'], 216)
+        self.assertEqual(quote_reference(dict(quote, update_time='2026-10-26 08:00:00'))['price'], 211)
+        self.assertEqual(quote_reference(dict(quote, after_price=None))['price'], 216)
+
     def test_overview_preserves_watchlist_order_and_marks_missing_quotes(self):
         result = build_overview(['US.AAPL', 'US.MISS'], dict(collected_at='2026-10-22T20:00:00+00:00',
             rows=[dict(code='US.AAPL',name='Provider Apple',last_price=110,prev_close_price=100,

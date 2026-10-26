@@ -389,10 +389,25 @@ class ResearchUiTests(unittest.TestCase):
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
         self.assertIn('最近买盘区间  $99.96–$100.00',text)
-        self.assertIn('可见 400 股 · 合并 3 档 · 距现价 0.10%',text)
+        self.assertIn('可见 400 股 · 合并 3 档 · 距常规时段最新成交价 0.10%',text)
         self.assertIn('最近卖盘区间  $100.12–$100.14',text)
         self.assertIn('并非全市场买卖总量',text)
         self.assertEqual(len(chart.findChildren(QProgressBar)),4)
+
+    def test_after_hours_order_book_compares_with_after_price_and_labels_regular_last(self):
+        book=dict(status='ok', depth=10, collected_at='2026-10-26T21:45:58+00:00',
+                  bid_server_time=None, ask_server_time=None,
+                  bids=[dict(price=216.15,volume=50),dict(price=216.37,volume=100)],
+                  asks=[dict(price=216.40,volume=150),dict(price=216.54,volume=60)])
+        quote=dict(last_price=216, after_price=216.4288, update_time='2026-10-26 17:45:57.947')
+        chart=self.window.order_book_result
+        chart.set_book(book,quote,language='zh',theme='dark')
+        self.app.processEvents()
+        text=' '.join(label.text() for label in chart.findChildren(QLabel))
+        self.assertIn('常规时段 last_price $216.00 · 盘后参考价 $216.43',text)
+        self.assertIn('距盘后参考价',text)
+        self.assertNotIn('距现价',text)
+        self.assertIn('交易所更新时间未提供',text)
 
     def test_language_switch_is_instant_and_keeps_report_selection_and_saved_inputs(self):
         from moopython.research import analyze_put_dataset

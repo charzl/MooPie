@@ -1,12 +1,40 @@
 """Read and describe visible order-book depth for one stock on demand."""
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from math import isfinite
+from zoneinfo import ZoneInfo
 
 from .market_collection import opend_connection, us_symbols
 
 
 def unavailable(symbol, reason):
     return dict(symbol=symbol, status='unavailable', reason=str(reason))
+
+
+def quote_reference(quote):
+    """Choose a session-matched trade price for comparing with visible depth."""
+    quote = quote or {}
+    stamp = quote.get('update_time')
+    session = 'regular'
+    if isinstance(stamp, str):
+        try:
+            observed = datetime.fromisoformat(stamp)
+            if observed.tzinfo is not None:
+                observed = observed.astimezone(ZoneInfo('America/New_York'))
+            clock = observed.time()
+            if time(16) <= clock < time(20): session = 'after'
+            elif clock >= time(20) or clock < time(4): session = 'overnight'
+            elif clock < time(9, 30): session = 'pre'
+        except ValueError:
+            pass
+    fields = {'regular': 'last_price', 'after': 'after_price',
+              'overnight': 'overnight_price', 'pre': 'pre_price'}
+    field = fields[session]
+    price = quote.get(field)
+    if type(price) not in (int, float) or not isfinite(price) or price <= 0:
+        field, session, price = 'last_price', 'regular', quote.get('last_price')
+    if type(price) not in (int, float) or not isfinite(price) or price <= 0:
+        price = None
+    return dict(price=price, field=field, session=session, update_time=stamp)
 
 
 def read_order_book(symbol, port=11111, depth=10):
