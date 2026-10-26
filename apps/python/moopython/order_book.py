@@ -37,10 +37,10 @@ def quote_reference(quote):
     return dict(price=price, field=field, session=session, update_time=stamp)
 
 
-def read_order_book(symbol, port=11111, depth=10):
+def read_order_book(symbol, port=11111, depth=60):
     code = us_symbols([symbol])[0]
-    if type(depth) is not int or not 1 <= depth <= 10:
-        raise ValueError('Order-book depth must be 1–10')
+    if type(depth) is not int or not 1 <= depth <= 60:
+        raise ValueError('Order-book depth must be 1–60')
     try:
         with opend_connection(port=port) as service:
             sdk, context = service.sdk, service.context
@@ -63,7 +63,8 @@ def read_order_book(symbol, port=11111, depth=10):
         return dict(symbol=code, status='ok', collected_at=datetime.now(timezone.utc).isoformat(),
                     bid_server_time=response.get('svr_recv_time_bid') or None,
                     ask_server_time=response.get('svr_recv_time_ask') or None,
-                    depth=depth, bids=sides['bids'], asks=sides['asks'],
+                    depth=depth, returned_bids=len(sides['bids']), returned_asks=len(sides['asks']),
+                    bids=sides['bids'], asks=sides['asks'],
                     scope='visible_top_levels', source='moomoo OpenD get_order_book')
     except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError) as error:
         return unavailable(code, error)

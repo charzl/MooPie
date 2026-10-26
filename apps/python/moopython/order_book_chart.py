@@ -51,6 +51,32 @@ class OrderBookChart(QScrollArea):
         self.body.addWidget(label)
         return label
 
+    def _volume_section(self, title, selected, *, english, theme):
+        self._label(title, large=True)
+        visible = [zone['volume'] for side in ('bids', 'asks') for zone in selected[side]]
+        maximum = max(visible, default=1)
+        for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
+                            ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
+            self._label(('Bids' if side == 'bids' else 'Asks') if english else ('买盘' if side == 'bids' else '卖盘'))
+            for zone in selected[side]:
+                line = QHBoxLayout()
+                label = price_range(zone)
+                if zone['distance_pct'] is not None:
+                    label += f'  ({zone["distance_pct"]:.2f}%)'
+                range_label = QLabel(label); range_label.setMinimumWidth(135)
+                bar = QProgressBar(); bar.setRange(0, max(1, int(maximum)))
+                bar.setValue(int(zone['volume'])); bar.setTextVisible(False)
+                bar.setFixedHeight(16)
+                track = '#303542' if theme == 'dark' else '#dce4ed'
+                bar.setStyleSheet(f'QProgressBar{{border:0;border-radius:5px;background:{track};}}'
+                                  f'QProgressBar::chunk{{background:{color};border-radius:5px;}}')
+                volume = QLabel(f'{zone["volume"]:,.0f}')
+                volume.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                volume.setMinimumWidth(65)
+                line.addWidget(range_label); line.addWidget(bar, 1); line.addWidget(volume)
+                self.body.addLayout(line)
+        if not visible: self._label('No visible levels' if english else '暂无可见档位')
+
     def set_message(self, message, *, language='zh', theme='dark'):
         self.book = None
         self.quote = None
@@ -101,28 +127,14 @@ class OrderBookChart(QScrollArea):
                              f'可见 {nearest["volume"]:,.0f} 股 · 合并 {nearest["levels"]} 档') + distance)
             else:
                 self._label(title + (' · unavailable' if english else ' · 暂无可见挂单'))
-        self._label('Nearby volume by merged price range' if english else '邻近价位合并后的挂单量', large=True)
-        visible = [zone['volume'] for side in ('bids', 'asks') for zone in zones[side][:4]]
-        maximum = max(visible, default=1)
-        for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
-                            ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
-            title = ('Bids' if side == 'bids' else 'Asks') if english else ('买盘' if side == 'bids' else '卖盘')
-            self._label(title)
-            for zone in zones[side][:4]:
-                line = QHBoxLayout()
-                range_label = QLabel(price_range(zone)); range_label.setMinimumWidth(135)
-                bar = QProgressBar(); bar.setRange(0, max(1, int(maximum)))
-                bar.setValue(int(zone['volume'])); bar.setTextVisible(False)
-                bar.setFixedHeight(16)
-                track = '#303542' if theme == 'dark' else '#dce4ed'
-                bar.setStyleSheet(f'QProgressBar{{border:0;border-radius:5px;background:{track};}}'
-                                  f'QProgressBar::chunk{{background:{color};border-radius:5px;}}')
-                volume = QLabel(f'{zone["volume"]:,.0f}')
-                volume.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                volume.setMinimumWidth(65)
-                line.addWidget(range_label); line.addWidget(bar, 1); line.addWidget(volume)
-                self.body.addLayout(line)
-        if not visible: self._label('No visible levels' if english else '暂无可见档位')
+        strongest = {side: sorted(zones[side], key=lambda zone: (-zone['volume'],
+                         zone['distance_pct'] if zone['distance_pct'] is not None else 0))[:3]
+                     for side in ('bids', 'asks')}
+        self._volume_section('Largest visible ranges in returned depth' if english else
+                             '已返回档位中挂单量最大的区间', strongest, english=english, theme=theme)
+        self._volume_section('Nearby volume by merged price range' if english else
+                             '邻近价位合并后的挂单量',
+                             {side: zones[side][:4] for side in ('bids', 'asks')}, english=english, theme=theme)
         collected = book.get('collected_at') or ('Unavailable' if english else '未提供')
         self._label(('Collected (UTC): ' if english else '盘口采集（UTC）：') + collected, muted=True)
         if (quote or {}).get('update_time'):
@@ -135,6 +147,8 @@ class OrderBookChart(QScrollArea):
         if not book.get('bid_server_time') or not book.get('ask_server_time'):
             self._label('Exchange update time unavailable; freshness cannot be verified.' if english else
                         '交易所更新时间未提供，无法核对盘口时效。', muted=True)
-        self._label((f'Only the top {book["depth"]} visible levels from this feed; orders can be cancelled.' if english else
-                     f'仅统计当前行情源可见的前 {book["depth"]} 档挂单；挂单可撤销，并非全市场买卖总量。'), muted=True)
+        bid_count = book.get('returned_bids', len(book.get('bids', [])))
+        ask_count = book.get('returned_asks', len(book.get('asks', [])))
+        self._label((f'Requested up to {book["depth"]} levels per side; received {bid_count} bid / {ask_count} ask levels. Only this feed; orders can be cancelled.' if english else
+                     f'每侧请求最多 {book["depth"]} 档，实际返回买 {bid_count} / 卖 {ask_count} 档。只统计当前行情源可见挂单；挂单可撤销，并非全市场买卖总量。'), muted=True)
         self.body.addStretch()

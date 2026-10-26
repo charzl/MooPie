@@ -45,6 +45,8 @@ class StockOverviewTests(unittest.TestCase):
         with patch('moopython.order_book.opend_connection',connection):
             result=read_order_book('AAPL')
         self.assertEqual(context.subscribed,(['US.AAPL'],['book'],False))
+        self.assertEqual(result['depth'], 60)
+        self.assertEqual((result['returned_bids'], result['returned_asks']), (3, 2))
         self.assertEqual(result['status'],'ok')
         self.assertIsNone(result['bid_server_time'])
         zones=visible_price_zones(result,100.01)
