@@ -66,6 +66,8 @@ price_signals: 按股票代码组织的独立价格位置与择时信号
 
 桌面首页的研究 CLI `overview` 返回 `rows[]`：`symbol`、`name`、`security_type`、`price`、`previous_close`、`change_pct`、`update_time`，以及报价的 `collected_at`、`data_access`。界面只显示股票名、股价和涨跌；缺失价格或昨收时对应数值为 `null`。个股 `trend --depth` 另附 `quote`、`order_book`；有效 `price_signals` 保存到 SQLite 并返回 `price_signal_saved_at`，当前计算失败且存在旧记录时返回 `saved_price_signal`（含 `signal` 和 `calculated_at`）。个股信号还附带 `multi_timeframe`：`version`、`status`、`source`、`decision_cutoff`、`periods.week` / `periods.month`，每个周期含 `as_of`、`bars`、ATR 与支撑阻力区间，数据不足时保留 `reason`。盘口含 `status`、`collected_at`、`bid_server_time`、`ask_server_time`、前十档 `bids` / `asks`（价、可见数量）。获取失败保留 `unavailable` 原因，不影响可用的趋势或报价。盘口不是 `price_signals.order_flow`，后者仍不声称已验证实际成交方向。
 
+`research_cli radar` 读取相同 Watchlist 报价和 SQLite 已保存价位，返回按关注状态与距支撑区排序的 `rows[]`。每行在首页报价字段外增加 `support_low`、`support_high`、`signal_as_of`、`alert_mode`、`state`、`distance_pct`、`stale_alert`；没有价位或报价时相应字段为 `null`，状态为 `levels_unavailable` 或 `quote_unavailable`。`research_cli alerts` 的记录增加 `confirmation_mode`、`entered_at`、`last_bar_date`；`event` 只在首次进入确认或失效状态时为真。
+
 桌面「导出结果」会再按动作包装：顶层的 `put` 和 / 或 `trend` 对应上述单股票研究结果。重算桌面 Put 导出时提取 `exported['put']['input_dataset']`；直接保存的研究 CLI Put 结果则提取 `result['input_dataset']`。再把原始 dataset 交给 `analyze` 或研究 CLI `--input`，报告本身不能当作原始数据。
 
 研究 CLI 的已处理运行错误为 `{"error":"..."}`，参数用法错误仍是 argparse stderr；先检查退出码再解析。

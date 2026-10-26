@@ -156,6 +156,22 @@ class StoreTests(unittest.TestCase):
                 self.assertEqual(db.execute('SELECT * FROM snapshots').fetchall(), before)
                 self.assertEqual(db.execute('SELECT * FROM settings').fetchall(), settings)
 
+    def test_v7_upgrade_preserves_watchlist_and_old_quote_alert(self):
+        from moopython.database import ROOT, MIGRATIONS
+        with closing(sqlite3.connect(self.path)) as db:
+            for filename in MIGRATIONS[:7]:
+                db.executescript((ROOT / 'migrations' / filename).read_text(encoding='utf-8'))
+            db.execute('PRAGMA user_version=7')
+            db.execute("INSERT INTO watchlist (symbol, added_at, source) VALUES ('US.TEST', '2026-10-23', 'test')")
+            db.execute("""INSERT INTO buy_alerts VALUES
+                ('US.TEST', 90, 94, '2026-10-23', 'inside', '2026-10-26 09:31:00', 93, NULL, '2026-10-26T17:00:00+00:00')""")
+            db.commit()
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 8)
+            self.assertEqual(db.execute('SELECT symbol FROM watchlist').fetchone()[0], 'US.TEST')
+            self.assertEqual(db.execute('SELECT status, confirmation_mode, entered_at FROM buy_alerts').fetchone(),
+                             ('inside', 'quote', ''))
+
     def test_generated_schema_matches_migrations_and_recreates_tables_and_indexes(self):
         from moopython.database import ROOT, schema_sql
         generated = schema_sql()

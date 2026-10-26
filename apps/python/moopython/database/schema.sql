@@ -11,7 +11,8 @@ CREATE TABLE buy_alerts (
     last_price REAL,
     triggered_at TEXT,
     updated_at TEXT NOT NULL
-);
+, confirmation_mode TEXT NOT NULL DEFAULT 'quote'
+    CHECK (confirmation_mode IN ('quote', 'daily_close')), entered_at TEXT NOT NULL DEFAULT '', last_bar_date TEXT NOT NULL DEFAULT '');
 
 CREATE TABLE paper_clients (
     experiment_id INTEGER NOT NULL REFERENCES paper_experiments(id),
@@ -142,4 +143,4 @@ CREATE INDEX snapshot_retention ON snapshots(fetched_at);
 CREATE INDEX snapshot_symbol_time
     ON snapshots(symbol, operation, session_date, fetched_at DESC);
 
-PRAGMA user_version=7;
+PRAGMA user_version=8;

@@ -12,7 +12,7 @@ from .research import analyze_put_dataset, run_research
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Single-stock or Watchlist research')
-    parser.add_argument('action', choices=['overview', 'put', 'trend', 'add', 'sync-directory', 'alerts'])
+    parser.add_argument('action', choices=['overview', 'radar', 'put', 'trend', 'add', 'sync-directory', 'alerts'])
     parser.add_argument('symbol', nargs='?')
     parser.add_argument('--watchlist', type=Path, help='Research this JSON instead of the database Watchlist; read-only input')
     parser.add_argument('--port', type=int, default=11111)
@@ -41,6 +41,7 @@ def main(argv=None):
             alerts = BuyAlertStore()
             symbols = alerts.active_symbols()
             rows = []
+            daily_error = None
             if symbols:
                 with redirect_stdout(sys.stderr):
                     with market_data_connection(port=args.port, refresh=True) as service:
@@ -48,7 +49,30 @@ def main(argv=None):
                 for quote in quote_rows:
                     record, event = alerts.observe(quote['code'], quote, with_event=True)
                     if record: rows.append(dict(symbol=quote['code'], quote=quote, alert=record, event=event))
-            emit(dict(action='alerts', rows=rows))
+                close_symbols = [row['symbol'] for row in rows if row['alert']['status'] == 'inside'
+                                 and row['alert']['confirmation_mode'] == 'daily_close']
+                if close_symbols:
+                    try:
+                        with redirect_stdout(sys.stderr):
+                            with market_data_connection(port=args.port, update=True) as service:
+                                daily = service.daily_bars(close_symbols)
+                        series_by_symbol = {item['symbol']: item for item in daily.get('daily_series', [])}
+                        for row in rows:
+                            if row['symbol'] not in close_symbols: continue
+                            series = series_by_symbol.get(row['symbol'])
+                            if series and series.get('bars'):
+                                bar = series['bars'][-1]
+                                if bar.get('complete') is True and series.get('as_of') == bar.get('date'):
+                                    record, event = alerts.observe_close(row['symbol'], bar.get('close'),
+                                                                         bar.get('date'), with_event=True)
+                                    row['alert'], row['event'] = record, row['event'] or event
+                                else:
+                                    daily_error = '日线尚未标记为已完成；收盘确认未执行'
+                            else:
+                                daily_error = str(series.get('error') if series else '未返回已完成日线')
+                    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+                        daily_error = str(error)
+            emit(dict(action='alerts', rows=rows, daily_error=daily_error))
             return 0
         if args.depth and (args.action != 'trend' or not args.symbol):
             raise ValueError('--depth requires a single-stock trend query')
@@ -90,9 +114,9 @@ def main(argv=None):
                 except (OSError, RuntimeError, ValueError, KeyError) as error:
                     result['price_signal_storage_error'] = str(error)
             return result
-        if args.action == 'overview':
+        if args.action in ('overview', 'radar'):
             if args.symbol or args.input or args.watchlist or args.config or args.saved or args.depth:
-                raise ValueError('overview reads the database Watchlist and does not accept stock/input/watchlist/config/saved/depth')
+                raise ValueError('overview/radar reads the database Watchlist and does not accept stock/input/watchlist/config/saved/depth')
             from .security_directory import SecurityDirectory
             from .stock_overview import build_overview
             from .watchlist_store import WatchlistStore
@@ -104,6 +128,13 @@ def main(argv=None):
                     snapshot = service.snapshots(symbols)
                 identities = SecurityDirectory().lookup(symbols)
                 result = build_overview(symbols, snapshot, identities)
+            if args.action == 'radar':
+                from .buy_radar import build_radar
+                from .price_signal_store import PriceSignalStore
+                from .buy_alert_store import BuyAlertStore
+                signal_store, alert_store = PriceSignalStore(), BuyAlertStore()
+                result = build_radar(result, {code: signal_store.latest(code) for code in symbols},
+                                     {code: alert_store.get(code) for code in symbols})
             emit(result)
             return 0
         if args.action == 'sync-directory':

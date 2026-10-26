@@ -612,6 +612,16 @@ CATALOG += '''
 
 CATALOG += '''
 计划投入 $	Planned amount $
+风险预算 $	Risk budget $
+不限	No limit
+确认方式	Confirmation mode
+后续报价站回上沿	Later quote above upper edge
+次交易日收盘站回上沿	Later daily close above upper edge
+买点雷达	Buy-point radar
+买点雷达 · Watchlist	Buy-point radar · Watchlist
+支撑区	Support zone
+状态	Status
+距支撑上沿	Distance to support upper edge
 计算分批计划	Calculate staged plan
 开启买点提醒	Enable buy-point alert
 暂停提醒	Pause alert

@@ -137,6 +137,9 @@ class ResearchWindow(QMainWindow):
         self.home_button = QPushButton('首页 · Watchlist')
         self.home_button.clicked.connect(self.search_watchlist)
         scope_layout.addWidget(self.home_button)
+        self.radar_button = QPushButton('买点雷达')
+        self.radar_button.clicked.connect(self.show_radar)
+        scope_layout.addWidget(self.radar_button)
         self.scope_list = QListWidget(); self.scope_list.setObjectName('scopeList')
         self.scope_list.setItemDelegate(WatchlistChangeDelegate(self.scope_list))
         self.scope_list.itemClicked.connect(self.choose_scope)
@@ -288,17 +291,33 @@ class ResearchWindow(QMainWindow):
         self.plan_budget.setValue(3000)
         self.plan_budget.setSingleStep(100)
         plan_controls.addWidget(self.plan_budget)
+        plan_controls.addWidget(QLabel('风险预算 $'))
+        self.plan_risk = QDoubleSpinBox()
+        self.plan_risk.setRange(0, 1000000000)
+        self.plan_risk.setDecimals(2)
+        self.plan_risk.setSpecialValueText('不限')
+        self.plan_risk.setToolTip('0 表示不限；仅限制跌至支撑下沿的估算账面损失。')
+        plan_controls.addWidget(self.plan_risk)
         self.plan_button = QPushButton('计算分批计划')
         self.plan_button.clicked.connect(self.calculate_buy_plan)
         plan_controls.addWidget(self.plan_button)
-        self.alert_button = QPushButton('开启买点提醒')
-        self.alert_button.clicked.connect(self.arm_buy_alert)
-        plan_controls.addWidget(self.alert_button)
-        self.pause_alert_button = QPushButton('暂停提醒')
-        self.pause_alert_button.clicked.connect(self.pause_buy_alert)
-        plan_controls.addWidget(self.pause_alert_button)
         plan_controls.addStretch()
         technical_layout.addLayout(plan_controls)
+        alert_controls = QHBoxLayout()
+        alert_controls.addWidget(QLabel('确认方式'))
+        self.alert_mode = SelectBox()
+        self.alert_mode.addItem('后续报价站回上沿', 'quote')
+        self.alert_mode.addItem('次交易日收盘站回上沿', 'daily_close')
+        self.alert_mode.setToolTip('日线模式先观察到价格进入支撑区，再等下一交易日已完成日线收盘站上上沿。')
+        alert_controls.addWidget(self.alert_mode)
+        self.alert_button = QPushButton('开启买点提醒')
+        self.alert_button.clicked.connect(self.arm_buy_alert)
+        alert_controls.addWidget(self.alert_button)
+        self.pause_alert_button = QPushButton('暂停提醒')
+        self.pause_alert_button.clicked.connect(self.pause_buy_alert)
+        alert_controls.addWidget(self.pause_alert_button)
+        alert_controls.addStretch()
+        technical_layout.addLayout(alert_controls)
         self.plan_result = QLabel('选择个股后，可按已确认支撑区计算假设计划。')
         self.plan_result.setWordWrap(True)
         self.plan_result.setObjectName('muted')
@@ -335,9 +354,24 @@ class ResearchWindow(QMainWindow):
         self.overview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.overview_table.cellClicked.connect(self.open_overview_row)
         overview_layout.addWidget(self.overview_table, 1)
+        self.radar_page = QWidget()
+        radar_layout = QVBoxLayout(self.radar_page)
+        radar_layout.addWidget(QLabel('买点雷达 · Watchlist'))
+        self.radar_note = QLabel('正在读取报价与已保存支撑区…')
+        self.radar_note.setObjectName('muted'); self.radar_note.setWordWrap(True)
+        radar_layout.addWidget(self.radar_note)
+        self.radar_table = QTableWidget(0, 5)
+        self.radar_table.setHorizontalHeaderLabels(['股票', '股价', '支撑区', '状态', '距支撑上沿'])
+        self.radar_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.radar_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.radar_table.verticalHeader().setVisible(False)
+        self.radar_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.radar_table.cellClicked.connect(self.open_radar_row)
+        radar_layout.addWidget(self.radar_table, 1)
         self.analysis_stack = QStackedWidget()
         self.analysis_stack.addWidget(self.overview_page)
         self.analysis_stack.addWidget(self.tabs)
+        self.analysis_stack.addWidget(self.radar_page)
         layout.addWidget(self.analysis_stack, 1)
         self.reset_panels()
         self.symbol.textChanged.connect(self.reset_panels)
@@ -370,12 +404,16 @@ class ResearchWindow(QMainWindow):
         if self.process is None: self.ui.set_text(self.status,message)
 
     def refresh_current(self, *, update=False, refresh=False):
-        action = 'overview' if self.analysis_stack.currentIndex() == 0 else 'trend' if self.tabs.currentIndex() == 2 else 'put'
+        action = ('overview' if self.analysis_stack.currentIndex() == 0 else
+                  'radar' if self.analysis_stack.currentIndex() == 2 else
+                  'trend' if self.tabs.currentIndex() == 2 else 'put')
         self.start(action, update=update, refresh=refresh, depth=action == 'trend' and bool(self.symbol.text().strip()))
 
     def change_language(self, value):
         self.ui.set_language(value)
         self.update_watchlist_label()
+        if self.analysis_stack.currentIndex() == 2 and self.results.get('radar'):
+            self.display_radar(self.results['radar'])
         current = self.results.get('trend', {}).get('symbol')
         if current:
             self.calculate_buy_plan()
@@ -389,6 +427,8 @@ class ResearchWindow(QMainWindow):
     def change_theme(self, value):
         self.ui.set_theme(value)
         self.update_watchlist_label()
+        if self.analysis_stack.currentIndex() == 2 and self.results.get('radar'):
+            self.display_radar(self.results['radar'])
         current = self.results.get('trend', {}).get('symbol')
         if current:
             try: self.show_alert_state(self.buy_alerts.get(current))
@@ -419,11 +459,13 @@ class ResearchWindow(QMainWindow):
 
     def calculate_buy_plan(self):
         try:
-            plan = calculate_plan(self.current_buy_signal(), self.plan_budget.value())
+            plan = calculate_plan(self.current_buy_signal(), self.plan_budget.value(), self.plan_risk.value() or None)
         except ValueError as error:
             self.ui.set_text(self.plan_result, str(error))
             return
         if self.ui.language == 'en':
+            cap_note = (f' Risk budget ${plan["risk_budget"]:,.2f} reduced the original ${plan["uncapped_loss_to_stop"]:,.2f} estimate.'
+                        if plan['risk_limited'] else '')
             cells = ''.join(f'<td width="33%"><b>Tranche {index} · {weight}%</b><br>'
                             f'<span style="font-size:17px">${row["price"]:,.2f}</span> × {row["shares"]} shares</td>'
                             for index, (weight, row) in enumerate(zip((40, 30, 30), plan['tranches']), 1))
@@ -432,7 +474,7 @@ class ResearchWindow(QMainWindow):
             self.plan_result.setText(
                 '<h3 style="margin:2px 0">Hypothetical stock plan</h3><table width="100%" cellpadding="5"><tr>' + cells + '</tr></table>'
                 f'<p>All filled: {plan["shares"]} shares · Cost ${plan["cost"]:,.2f} · Unused ${plan["unused"]:,.2f}. '
-                f'Support floor ${plan["stop"]:,.2f}; paper loss at that price about ${plan["max_loss_to_stop"]:,.2f}; {target}.</p>'
+                f'Support floor ${plan["stop"]:,.2f}; paper loss at that price about ${plan["max_loss_to_stop"]:,.2f}; {target}.{cap_note}</p>'
                 '<p style="color:#9c6920">Later tranches assume a retest with support intact. Fees, slippage and gaps are excluded; losses can be larger.</p>')
             return
         cells = ''.join(f'<td width="33%"><b>第 {index} 批 · {weight}%</b><br>'
@@ -440,10 +482,12 @@ class ResearchWindow(QMainWindow):
                         for index, (weight, row) in enumerate(zip((40, 30, 30), plan['tranches']), 1))
         target = (f'上方阻力 ${plan["resistance"]:,.2f}，至该价账面空间 ${plan["target_gain"]:,.2f}'
                   if plan['resistance'] is not None else '上方暂无已确认阻力，无法估算目标空间')
+        cap_note = (f' 风险预算 ${plan["risk_budget"]:,.2f} 将原估算亏损 ${plan["uncapped_loss_to_stop"]:,.2f} 对应的股数缩小。'
+                    if plan['risk_limited'] else '')
         self.plan_result.setText(
             '<h3 style="margin:2px 0">假设买入计划</h3><table width="100%" cellpadding="5"><tr>' + cells + '</tr></table>'
             f'<p>全部成交：{plan["shares"]} 股 · 成本 ${plan["cost"]:,.2f} · 未用 ${plan["unused"]:,.2f}。'
-            f'支撑下沿 ${plan["stop"]:,.2f}，跌至该价账面亏损约 ${plan["max_loss_to_stop"]:,.2f}；{target}。</p>'
+            f'支撑下沿 ${plan["stop"]:,.2f}，跌至该价账面亏损约 ${plan["max_loss_to_stop"]:,.2f}；{target}。{cap_note}</p>'
             '<p style="color:#9c6920">后两批仅考虑支撑有效时的回踩；未计费用、滑点或跳空，跌破支撑可能损失更多。</p>')
 
     def show_alert_state(self, record):
@@ -459,6 +503,11 @@ class ResearchWindow(QMainWindow):
                   {'watching': '等待价格进入支撑区', 'inside': '已进入支撑区，等待后续新报价重新站上区间上沿',
                    'confirmed': '条件已出现：先入支撑区，后重新站上上沿；请自行复核',
                    'invalidated': '条件失效：价格跌破支撑下沿', 'paused': '提醒已暂停'})
+        if record.get('confirmation_mode') == 'daily_close':
+            labels['inside'] = ('Inside support; waiting for a completed close above the upper edge on a later trading day'
+                                if self.ui.language == 'en' else '已进入支撑区，等待下一交易日已完成日线收盘站上上沿')
+            labels['confirmed'] = ('Condition observed: a later daily close reclaimed the upper edge; review before acting'
+                                   if self.ui.language == 'en' else '条件已出现：后续日线收盘站上上沿；请自行复核')
         color = ({'inside': '#d5a031', 'confirmed': '#48d67f', 'invalidated': '#ff7777'}
                  if self.ui.effective_theme == 'dark' else
                  {'inside': '#8e6000', 'confirmed': '#167a3e', 'invalidated': '#bd3030'})
@@ -505,6 +554,12 @@ class ResearchWindow(QMainWindow):
                 record, event = self.buy_alerts.observe(symbol, result['quote'], with_event=True)
             else:
                 record, event = self.buy_alerts.get(symbol), False
+            trend = result.get('trend', {})
+            if record and record['status'] == 'inside' and record['confirmation_mode'] == 'daily_close' and trend.get('status') == 'ok':
+                record, close_event = self.buy_alerts.observe_close(symbol, trend.get('metrics', {}).get('close'),
+                                                                    trend.get('as_of'), with_event=True)
+                event = event or close_event
+            if record: self.alert_mode.setCurrentIndex(self.alert_mode.findData(record['confirmation_mode']))
             self.show_alert_state(record)
             if event:
                 QMessageBox.information(self, self.ui.translate('买点条件更新'), symbol + '：' + self.alert_result.text())
@@ -515,7 +570,7 @@ class ResearchWindow(QMainWindow):
         signal = self.current_buy_signal()
         try:
             result = self.results.get('trend', {})
-            record = self.buy_alerts.arm(signal, result.get('quote'))
+            record = self.buy_alerts.arm(signal, result.get('quote'), mode=self.alert_mode.currentData())
             self.show_alert_state(record)
             self.poll_buy_alerts()
         except (OSError, RuntimeError, ValueError, TypeError) as error:
@@ -558,13 +613,19 @@ class ResearchWindow(QMainWindow):
             for row in payload.get('rows', []):
                 if row['symbol'] == current: self.show_alert_state(row['alert'])
                 if row.get('event'):
-                    message = (('Reclaimed the support zone upper edge; review the current quote.'
-                                if row['alert']['status'] == 'confirmed' else
-                                'Fell below the support zone; the original condition is invalid.')
-                               if self.ui.language == 'en' else
-                               ('已重新站上支撑区上沿，请自行复核。' if row['alert']['status'] == 'confirmed'
-                                else '已跌破支撑区下沿，原条件失效。'))
+                    confirmed = row['alert']['status'] == 'confirmed'
+                    daily = row['alert']['confirmation_mode'] == 'daily_close'
+                    if self.ui.language == 'en':
+                        message = ('A later daily close reclaimed the support upper edge; review the current price.' if daily else
+                                   'Reclaimed the support zone upper edge; review the current quote.') if confirmed else 'Fell below the support zone; the original condition is invalid.'
+                    else:
+                        message = ('后续日线收盘站上支撑区上沿，请复核当前价格。' if daily else
+                                   '已重新站上支撑区上沿，请自行复核。') if confirmed else '已跌破支撑区下沿，原条件失效。'
                     QMessageBox.information(self, self.ui.translate('买点条件更新'), row['symbol'] + '：' + message)
+            if payload.get('daily_error') and current:
+                current_alert = self.buy_alerts.get(current)
+                if current_alert and current_alert['confirmation_mode'] == 'daily_close':
+                    self.alert_result.setText(self.alert_result.text() + ' · 日线检查失败：' + payload['daily_error'])
         except (OSError, ValueError, KeyError) as error:
             self.alert_result.setText('买点提醒本次未能检查：' + str(error))
         finally:
@@ -573,6 +634,16 @@ class ResearchWindow(QMainWindow):
     def open_overview_row(self, row, _column):
         item = self.overview_table.item(row, 0)
         if item: self.open_stock(item.data(Qt.ItemDataRole.UserRole))
+
+    def open_radar_row(self, row, _column):
+        item = self.radar_table.item(row, 0)
+        if item: self.open_stock(item.data(Qt.ItemDataRole.UserRole))
+
+    def show_radar(self):
+        if self.process is not None: return
+        self.symbol.clear()
+        self.analysis_stack.setCurrentIndex(2)
+        self.start('radar', update=True)
 
     def choose_scope(self, item):
         if self.process is not None: return
@@ -687,14 +758,14 @@ class ResearchWindow(QMainWindow):
 
     def busy(self, value):
         if value: self.symbol_search.dismiss()
-        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.refresh_button, self.opend_button, self.watchlist_button, self.view_watchlist_action, self.add_watchlist_action, self.manage_watchlist_action, self.manage_button, self.home_button, self.scope_list, self.directory_action, self.rules_button, self.top_count, self.candidate_table, self.overview_table): control.setEnabled(not value)
+        for control in (self.symbol, self.port, self.put_button, self.trend_button, self.refresh_button, self.opend_button, self.watchlist_button, self.view_watchlist_action, self.add_watchlist_action, self.manage_watchlist_action, self.manage_button, self.home_button, self.radar_button, self.scope_list, self.directory_action, self.rules_button, self.top_count, self.candidate_table, self.overview_table, self.radar_table): control.setEnabled(not value)
         self.cancel_button.setVisible(value)
 
     def start(self, action, reuse=False, refresh=False, update=False, depth=False):
         if self.process is not None: return
         text = self.symbol.text().strip()
         try:
-            code = None if action in ('sync-directory', 'overview') else self.symbol_search.query_code()
+            code = None if action in ('sync-directory', 'overview', 'radar') else self.symbol_search.query_code()
             if action == 'add' and code is None: raise ValueError('请先输入要加入 Watchlist 的股票代码。')
         except ValueError as error:
             self.ui.set_text(self.status, str(error), 'setText'); return
@@ -702,8 +773,9 @@ class ResearchWindow(QMainWindow):
         if reuse and dataset is None:
             self.ui.set_text(self.status, '没有可复用的数据，请先抓取。', 'setText'); return
         if action == 'put' and not reuse: self.put_dataset = None
-        if action in ('overview','put','trend'): self.main_tabs.setCurrentIndex(0)
+        if action in ('overview','radar','put','trend'): self.main_tabs.setCurrentIndex(0)
         if action == 'overview': self.analysis_stack.setCurrentIndex(0)
+        elif action == 'radar': self.analysis_stack.setCurrentIndex(2)
         elif action in ('put','trend'): self.analysis_stack.setCurrentIndex(1)
         if code: self.settings.setValue('symbol', code.removeprefix('US.'))
         self.action = action
@@ -716,6 +788,7 @@ class ResearchWindow(QMainWindow):
         self.export_button.setEnabled(bool(self.results))
         if action in ('put','trend'): self.ui.set_text(self.panel(action), f'<h2>{esc(code or "Watchlist")}</h2><p>正在抓取和分析…</p>', 'setHtml')
         if action == 'overview': self.ui.set_text(self.overview_note, '正在读取 Watchlist 的价格和基本信息…', 'setText')
+        if action == 'radar': self.ui.set_text(self.radar_note, '正在读取报价与已保存支撑区…', 'setText')
         if action == 'trend': self.order_book_result.set_message('正在读取买卖盘…' if depth else '点击左侧股票查看盘口。',
                                                                  language=self.ui.language, theme=self.ui.effective_theme)
         self.ui.set_text(self.status, '正在用已采集的数据重新过滤和排序，不重新抓取行情。' if reuse else
@@ -724,6 +797,7 @@ class ResearchWindow(QMainWindow):
         if update: self.ui.set_text(self.status, '正在逐股检查缓存，只补抓缺失或过期股票，再合并 Top 20…', 'setText')
         if action == 'sync-directory': self.ui.set_text(self.status, '正在更新股票和 ETF 目录；不抓取期权或股票报价…', 'setText')
         if action == 'overview': self.ui.set_text(self.status, '正在读取 Watchlist 股票价格和基本信息…', 'setText')
+        if action == 'radar': self.ui.set_text(self.status, '正在比较 Watchlist 报价与已保存支撑区…', 'setText')
         self.output.clear(); self.errors.clear()
         self.result_path.unlink(missing_ok=True)
         process = QProcess(self); self.process = process
@@ -782,6 +856,7 @@ class ResearchWindow(QMainWindow):
                 return
             if self.action == 'put': self.clear_candidates('本次分析已取消，没有生成候选。')
             if self.action == 'overview': self.ui.set_text(self.overview_note, '本次价格更新已取消。', 'setText')
+            if self.action == 'radar': self.ui.set_text(self.radar_note, '本次雷达更新已取消。', 'setText')
             self.ui.set_text(self.price_signal_result, '本次分析已取消，未生成价格信号。', 'setPlainText')
             if self.action in ('put','trend'):
                 self.ui.set_text(self.panel(self.action), '本次分析已取消。可以重新输入股票并开始查询。', 'setPlainText')
@@ -822,6 +897,11 @@ class ResearchWindow(QMainWindow):
             self.ui.set_text(self.overview_note, '首页价格暂不可用：' + message, 'setText')
             self.ui.set_text(self.status, '首页价格未完成；请检查 OpenD 和行情权限。', 'setText')
             return
+        if self.action == 'radar':
+            self.radar_table.setRowCount(0)
+            self.ui.set_text(self.radar_note, '买点雷达暂不可用：' + message, 'setText')
+            self.ui.set_text(self.status, '买点雷达未完成；请检查 OpenD 和行情权限。', 'setText')
+            return
         self.ui.set_text(self.price_signal_result, '本次查询未完成，未生成价格信号。', 'setPlainText')
         if self.action == 'put':
             self.clear_candidates('查询失败：' + message)
@@ -854,10 +934,60 @@ class ResearchWindow(QMainWindow):
         self.ui.set_text(self.status, '首页已显示股价和涨跌；点击一只股票查看详细价位。', 'setText')
         self.export_button.setEnabled(True)
 
+    def display_radar(self, result):
+        self.results['radar'] = result
+        rows = result.get('rows', [])
+        self.watchlist_quotes = {row['symbol']: row for row in rows}
+        self.update_watchlist_label()
+        self.analysis_stack.setCurrentIndex(2)
+        labels = {'watching': '等待进入支撑区', 'inside': '已进入支撑区 · 待确认',
+                  'confirmed': '条件已出现 · 请复核', 'invalidated': '条件失效',
+                  'paused': '提醒已暂停', 'inside_unarmed': '在支撑区 · 未提醒',
+                  'above': '支撑区上方', 'below': '跌破支撑区',
+                  'levels_unavailable': '暂无已保存支撑', 'quote_unavailable': '报价不可用'}
+        if self.ui.language == 'en':
+            labels = {'watching': 'Waiting for support', 'inside': 'Inside support · pending',
+                      'confirmed': 'Condition observed · review', 'invalidated': 'Condition invalid',
+                      'paused': 'Alert paused', 'inside_unarmed': 'Inside support · no alert',
+                      'above': 'Above support', 'below': 'Below support',
+                      'levels_unavailable': 'No saved support', 'quote_unavailable': 'Quote unavailable'}
+        colors = {'inside': '#d5a031', 'confirmed': '#48d67f', 'invalidated': '#ff7777',
+                  'inside_unarmed': '#d5a031', 'below': '#ff7777'} if self.ui.effective_theme == 'dark' else {
+                  'inside': '#8e6000', 'confirmed': '#167a3e', 'invalidated': '#bd3030',
+                  'inside_unarmed': '#8e6000', 'below': '#bd3030'}
+        self.radar_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
+            low, high = row.get('support_low'), row.get('support_high')
+            state = row['state']
+            mode = (' · daily close' if self.ui.language == 'en' else ' · 日收盘') if row.get('alert_mode') == 'daily_close' else ''
+            distance = row.get('distance_pct')
+            values = [row.get('name') or row['symbol'],
+                      f'${row["price"]:,.2f}' if row.get('price') is not None else '—',
+                      f'${low:,.2f}–${high:,.2f}' if low is not None and high is not None else '—',
+                      labels.get(state, state) + mode,
+                      f'{distance:.2f}%' if distance is not None else '—']
+            tooltip = (f'{row["symbol"]} · 报价 {row.get("update_time") or "时间未提供"}（纽约）'
+                       f' · 支撑日线 {row.get("signal_as_of") or "暂无"}'
+                       + (' · 提醒使用历史冻结区间' if row.get('stale_alert') else ''))
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0: item.setData(Qt.ItemDataRole.UserRole, row['symbol'])
+                item.setToolTip(tooltip)
+                if column == 3 and state in colors: item.setForeground(QColor(colors[state]))
+                self.radar_table.setItem(index, column, item)
+        self.ui.localize_table(self.radar_table)
+        self.ui.set_text(self.radar_note,
+            f'{len(rows)} 只股票 · 报价采集 {result.get("collected_at") or "时间未提供"}（UTC）。支撑区来自已保存的日线；悬停看日期，点击股票复核实时详情。', 'setText')
+        self.ui.set_text(self.status, '买点雷达已更新；状态仅供筛选，请在个股详情复核。', 'setText')
+        self.export_button.setEnabled(True)
+
     def display(self, result):
         action = result['action']
         if action == 'overview':
             self.display_overview(result)
+            return
+        if action == 'radar':
+            self.display_radar(result)
             return
         signals = dict(result.get('price_signals', {}))
         self.update_watchlist_label()

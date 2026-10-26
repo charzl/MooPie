@@ -206,18 +206,38 @@ class ResearchUiTests(unittest.TestCase):
         self.window.results['trend'] = dict(symbol='US.TEST', price_signals={'US.TEST': signal},
                                             quote=dict(last_price=99, update_time='2026-10-26 09:30:00'))
         self.window.plan_budget.setValue(3000)
+        self.window.plan_risk.setValue(50)
         self.window.plan_button.click()
         self.assertIn('$94.00', self.window.plan_result.text())
-        self.assertIn('× 12 股', self.window.plan_result.text())
-        self.assertIn('约 $75.00', self.window.plan_result.text())
+        self.assertIn('× 8 股', self.window.plan_result.text())
+        self.assertIn('约 $50.00', self.window.plan_result.text())
+        self.window.alert_mode.setCurrentIndex(self.window.alert_mode.findData('daily_close'))
         with patch.object(self.window, 'poll_buy_alerts'):
             self.window.alert_button.click()
         self.assertEqual(self.window.buy_alerts.get('US.TEST')['status'], 'watching')
+        self.assertEqual(self.window.buy_alerts.get('US.TEST')['confirmation_mode'], 'daily_close')
         self.window.pause_alert_button.click()
         self.assertEqual(self.window.buy_alerts.get('US.TEST')['status'], 'paused')
         self.window.change_language('en')
         self.assertIn('Hypothetical stock plan', self.window.plan_result.text())
         self.assertIn('Alert paused', self.window.alert_result.text())
+
+    def test_radar_is_separate_from_three_column_watchlist_and_opens_detail(self):
+        self.window.display_radar(dict(action='radar', collected_at='2026-10-26T17:00:00+00:00', rows=[
+            dict(symbol='US.TEST', name='Test Company', price=93, change_pct=-1,
+                 support_low=90, support_high=94, signal_as_of='2026-10-23',
+                 state='inside', distance_pct=0, alert_mode='daily_close',
+                 update_time='2026-10-26 10:00:00')]))
+        self.assertEqual(self.window.analysis_stack.currentIndex(), 2)
+        self.assertEqual(self.window.radar_table.rowCount(), 1)
+        self.assertIn('日收盘', self.window.radar_table.item(0, 3).text())
+        self.assertEqual(self.window.overview_table.columnCount(), 3)
+        with patch.object(self.window, 'open_stock') as open_stock:
+            self.window.open_radar_row(0, 0)
+            open_stock.assert_called_once_with('US.TEST')
+        with patch.object(self.window, 'start') as start:
+            self.window.refresh_current(update=True)
+            start.assert_called_once_with('radar', update=True, refresh=False, depth=False)
 
     def test_watchlist_shows_only_name_price_change_and_colors_direction(self):
         from moopython.research import analyze_put_dataset

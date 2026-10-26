@@ -1,4 +1,5 @@
 """Hypothetical stock tranches and quote-sequenced support alerts."""
+from datetime import date
 from math import floor, isfinite
 
 
@@ -13,9 +14,12 @@ def nearest_levels(signal):
                 as_of=signal['as_of'])
 
 
-def calculate_plan(signal, budget):
+def calculate_plan(signal, budget, risk_budget=None):
     if isinstance(budget, bool) or not isinstance(budget, (int, float)) or not isfinite(budget) or budget <= 0:
         raise ValueError('投入金额必须大于 0')
+    if risk_budget is not None and (isinstance(risk_budget, bool) or
+            not isinstance(risk_budget, (int, float)) or not isfinite(risk_budget) or risk_budget <= 0):
+        raise ValueError('风险预算必须大于 0；留空或设为 0 表示不限制')
     levels = nearest_levels(signal)
     if levels is None:
         raise ValueError('暂无已确认的下方支撑区，不能自动生成买入计划')
@@ -27,14 +31,22 @@ def calculate_plan(signal, budget):
     weights = [.4, .3, .3]
     tranches = [dict(price=round(price, 2), shares=floor(budget*weight / round(price, 2)),
                      allocation=budget*weight) for price, weight in zip(prices, weights)]
+    stop = round(low, 2)
+    loss_per_share = [max(0, item['price']-stop) for item in tranches]
+    full_risk = sum(loss*item['shares'] for loss, item in zip(loss_per_share, tranches))
+    risk_limited = risk_budget is not None and full_risk > risk_budget
+    if risk_limited:
+        factor = risk_budget/full_risk
+        for item in tranches:
+            item['shares'] = floor(item['shares']*factor)
     cost = sum(item['shares']*item['price'] for item in tranches)
     shares = sum(item['shares'] for item in tranches)
     if shares == 0:
-        raise ValueError('按当前分批比例，金额不足以购买一股；请增加投入金额')
-    stop = round(low, 2)
-    risk = sum(max(0, item['price']-stop)*item['shares'] for item in tranches)
+        raise ValueError('风险预算或投入金额不足以按当前分批比例购买一股')
+    risk = sum(loss*item['shares'] for loss, item in zip(loss_per_share, tranches))
     target = levels['resistance']
-    return dict(**levels, budget=budget, stop=stop, tranches=tranches,
+    return dict(**levels, budget=budget, risk_budget=risk_budget, risk_limited=risk_limited,
+                uncapped_loss_to_stop=round(full_risk, 2), stop=stop, tranches=tranches,
                 shares=shares, cost=round(cost, 2), unused=round(budget-cost, 2),
                 average=round(cost/shares, 2) if shares else None,
                 max_loss_to_stop=round(risk, 2),
@@ -54,7 +66,27 @@ def advance_alert(record, price, quote_time):
         status = 'invalidated'
     elif status == 'watching' and record['support_low'] <= price <= record['support_high']:
         status = 'inside'
-    elif status == 'inside' and price > record['support_high']:
+    elif status == 'inside' and record.get('confirmation_mode', 'quote') == 'quote' and price > record['support_high']:
         status = 'confirmed'
     return dict(record, status=status, last_quote_time=quote_time, last_price=price,
+                entered_at=quote_time if status == 'inside' and record['status'] == 'watching' else record.get('entered_at', ''),
                 triggered_at=quote_time if status in ('confirmed', 'invalidated') else record['triggered_at'])
+
+
+def advance_close_alert(record, close, as_of):
+    """A completed later trading day can confirm the quote-observed support touch."""
+    if record.get('confirmation_mode') != 'daily_close' or record['status'] != 'inside':
+        return record
+    if not isinstance(as_of, str) or len(as_of) != 10 or as_of <= record.get('last_bar_date', ''):
+        return record
+    try: date.fromisoformat(as_of)
+    except ValueError: return record
+    entered_at = record.get('entered_at', '')
+    if not entered_at or as_of <= entered_at[:10]:
+        return record
+    if isinstance(close, bool) or not isinstance(close, (int, float)) or not isfinite(close) or close <= 0:
+        return record
+    status = ('confirmed' if close > record['support_high'] else
+              'invalidated' if close < record['support_low'] else 'inside')
+    return dict(record, status=status, last_bar_date=as_of,
+                triggered_at=as_of if status in ('confirmed', 'invalidated') else record['triggered_at'])
