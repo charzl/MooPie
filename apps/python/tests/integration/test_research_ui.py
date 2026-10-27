@@ -397,7 +397,7 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('并非全市场买卖总量',text)
         self.assertIn('范围内买盘挂单最多的价格桶  -5%–0%',text)
         self.assertIn('自动分桶：参考价上下各 6 桶，每桶 5%',text)
-        self.assertGreaterEqual(len(chart.findChildren(QProgressBar)),13)
+        self.assertEqual(len(chart.findChildren(QProgressBar)),11)
         chart.bucket_width.setCurrentIndex(chart.bucket_width.findData(10))
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
@@ -446,6 +446,7 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('≥$1,300.00',text)
         self.assertIn('8,000 股',text)
         self.assertIn('9,000 股',text)
+        self.assertNotIn('0 股\n≈$0',text)
 
     def test_after_hours_order_book_compares_with_after_price_and_labels_regular_last(self):
         book=dict(status='ok', depth=10, collected_at='2026-10-26T21:45:58+00:00',

@@ -155,12 +155,16 @@ class OrderBookChart(QScrollArea):
 
     def _bucket_section(self, buckets, *, english, theme):
         self._label('Visible shares by price bucket' if english else '各价格桶的可见挂单股数', large=True)
-        maximum = max((item['volume'] for side in ('bids', 'asks') for item in buckets[side]), default=1)
+        visible = {side: [item for item in buckets[side] if item['volume'] > 0]
+                   for side in ('bids', 'asks')}
+        maximum = max((item['volume'] for side in ('bids', 'asks') for item in visible[side]), default=1)
         for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
                             ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
+            if not visible[side]:
+                continue
             self._label(('Bids' if side == 'bids' else 'Asks') if english else
                         ('买盘' if side == 'bids' else '卖盘'))
-            for bucket in buckets[side]:
+            for bucket in visible[side]:
                 line = QHBoxLayout()
                 label = QLabel(bucket_label(bucket)); label.setMinimumWidth(150)
                 bar = QProgressBar(); bar.setRange(0, max(1, int(maximum)))
@@ -174,7 +178,7 @@ class OrderBookChart(QScrollArea):
                 amount.setMinimumWidth(94)
                 line.addWidget(label); line.addWidget(bar, 1); line.addWidget(amount)
                 self.body.addLayout(line)
-        if not any(item['volume'] > 0 for side in ('bids', 'asks') for item in buckets[side]):
+        if not visible['bids'] and not visible['asks']:
             self._label('No visible levels' if english else '暂无可见档位')
 
     def set_message(self, message, *, language='zh', theme='dark'):
