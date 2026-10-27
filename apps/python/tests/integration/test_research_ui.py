@@ -432,6 +432,25 @@ class ResearchUiTests(unittest.TestCase):
         self.assertEqual(len(chart.zones), 1)
         self.assertIn('确认 2026-10-24', chart.zone_hits[0][1])
 
+    def test_stock_evidence_has_full_height_tabs(self):
+        self.window.resize(1480, 940)
+        self.window.analysis_stack.setCurrentIndex(1)
+        self.window.tabs.setCurrentIndex(2)
+        self.window.show()
+        self.app.processEvents()
+        self.assertEqual([self.window.depth_tabs.tabText(i) for i in range(4)],
+                         ['支撑阻力', '买卖盘变化', '走势分析', '买入计划与提醒'])
+        for index in range(4):
+            self.window.depth_tabs.setCurrentIndex(index)
+            self.app.processEvents()
+            self.assertGreater(self.window.depth_tabs.currentWidget().height(), 350)
+        with patch.object(self.window, 'start') as start:
+            self.window.trend_button.click()
+            start.assert_called_with('trend', depth=False)
+        self.assertEqual(self.window.depth_tabs.currentIndex(), 2)
+        self.window.change_language('en')
+        self.assertEqual(self.window.depth_tabs.tabText(1), 'Order Book Changes')
+
     def test_order_book_history_draws_sample_timeline(self):
         from moopython.order_book_chart import DepthTimelinePlot
         earlier = dict(status='ok', symbol='US.TEST', depth=60,
