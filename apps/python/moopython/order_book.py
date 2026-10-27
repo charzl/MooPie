@@ -1,7 +1,7 @@
 """Read and describe visible order-book depth for one stock on demand."""
 from datetime import datetime, time, timezone
 from decimal import Decimal, ROUND_FLOOR
-from math import isfinite, log10
+from math import isfinite
 from zoneinfo import ZoneInfo
 
 from .market_collection import opend_connection, us_symbols
@@ -9,47 +9,74 @@ from .market_collection import opend_connection, us_symbols
 
 # Temporary display range around the session-matched quote; adjust as the UI evolves.
 BOOK_BUCKET_RANGE_FRACTION = 0.30
+BOOK_BUCKETS_PER_SIDE = 6
 
 
 def auto_bucket_width(reference_price):
-    """Use about 5% of the reference price, rounded to a readable 1/2/5 step."""
+    """Divide either side of the 30% reference range into six exact 5% bands."""
     if type(reference_price) not in (int, float) or not isfinite(reference_price) or reference_price <= 0:
         raise ValueError('A positive reference price is required')
-    target = reference_price * 0.05
-    magnitude = 10 ** int(log10(target) // 1)
-    return min((1, 2, 5, 10), key=lambda step: abs(step * magnitude - target)) * magnitude
+    return float(Decimal(str(reference_price)) * Decimal(str(BOOK_BUCKET_RANGE_FRACTION)) /
+                 BOOK_BUCKETS_PER_SIDE)
 
 
-def visible_price_buckets(book, width, reference_price=None):
-    """Group returned visible shares in fixed-dollar bins and two outer bins."""
+def visible_price_buckets(book, width, reference_price=None, *, anchor_to_reference=False):
+    """Group visible shares in reference-anchored or fixed-dollar bins plus tails."""
     if type(width) not in (int, float) or not isfinite(width) or width <= 0:
         raise ValueError('Bucket width must be positive')
     if not book or book.get('status') != 'ok':
         return dict(bids=[], asks=[], width=width, lower=None, upper=None)
     valid_reference = (type(reference_price) in (int, float) and isfinite(reference_price)
                        and reference_price > 0)
-    lower = reference_price * (1 - BOOK_BUCKET_RANGE_FRACTION) if valid_reference else None
-    upper = reference_price * (1 + BOOK_BUCKET_RANGE_FRACTION) if valid_reference else None
+    if anchor_to_reference and not valid_reference:
+        raise ValueError('Reference-anchored buckets require a positive reference price')
+    decimal_reference = Decimal(str(reference_price)) if valid_reference else None
+    fraction = Decimal(str(BOOK_BUCKET_RANGE_FRACTION))
+    decimal_lower = decimal_reference * (1 - fraction) if valid_reference else None
+    decimal_upper = decimal_reference * (1 + fraction) if valid_reference else None
+    lower = float(decimal_lower) if decimal_lower is not None else None
+    upper = float(decimal_upper) if decimal_upper is not None else None
     decimal_width = Decimal(str(width))
+
+    def normal_bucket(index):
+        raw_low = ((decimal_reference if anchor_to_reference else Decimal(0))
+                   + index * decimal_width)
+        raw_high = raw_low + decimal_width
+        low = max(raw_low, decimal_lower) if decimal_lower is not None else raw_low
+        high = min(raw_high, decimal_upper) if decimal_upper is not None else raw_high
+        item = dict(kind='normal', low=float(low), high=float(high),
+                    volume=0, notional=0, levels=0)
+        if anchor_to_reference:
+            step = BOOK_BUCKET_RANGE_FRACTION * 100 / BOOK_BUCKETS_PER_SIDE
+            item.update(percent_low=index * step, percent_high=(index + 1) * step)
+        return item
+
     sides = {}
     for side in ('bids', 'asks'):
         grouped = {}
+        if anchor_to_reference:
+            indices = (range(-BOOK_BUCKETS_PER_SIDE, 0) if side == 'bids' else
+                       range(0, BOOK_BUCKETS_PER_SIDE))
+            grouped.update({('normal', index): normal_bucket(index) for index in indices})
         for row in book.get(side, []):
             price, volume = row['price'], row['volume']
             if volume <= 0:
                 continue
-            if lower is not None and price < lower:
+            decimal_price = Decimal(str(price))
+            if decimal_lower is not None and decimal_price < decimal_lower:
                 key, kind, low, high = ('below',), 'below', None, lower
-            elif upper is not None and price >= upper:
+            elif decimal_upper is not None and decimal_price >= decimal_upper:
                 key, kind, low, high = ('above',), 'above', upper, None
             else:
-                index = int((Decimal(str(price)) / decimal_width).to_integral_value(rounding=ROUND_FLOOR))
-                raw_low, raw_high = float(index * decimal_width), float((index + 1) * decimal_width)
+                anchor = decimal_reference if anchor_to_reference else Decimal(0)
+                index = int(((decimal_price - anchor) / decimal_width).to_integral_value(rounding=ROUND_FLOOR))
                 key, kind = ('normal', index), 'normal'
-                low = max(raw_low, lower) if lower is not None else raw_low
-                high = min(raw_high, upper) if upper is not None else raw_high
-            bucket = grouped.setdefault(key, dict(kind=kind, low=low, high=high,
-                                                   volume=0, notional=0, levels=0))
+                low = high = None
+            if kind == 'normal':
+                bucket = grouped.setdefault(key, normal_bucket(index))
+            else:
+                bucket = grouped.setdefault(key, dict(kind=kind, low=low, high=high,
+                                                       volume=0, notional=0, levels=0))
             bucket['volume'] += volume
             bucket['notional'] += price * volume
             bucket['levels'] += 1
@@ -59,7 +86,8 @@ def visible_price_buckets(book, width, reference_price=None):
         items.sort(key=lambda item: item['high'] if item['high'] is not None else float('inf'),
                    reverse=side == 'bids')
         sides[side] = items
-    return dict(**sides, width=width, lower=lower, upper=upper)
+    return dict(**sides, width=width, lower=lower, upper=upper,
+                anchor_to_reference=anchor_to_reference)
 
 
 def unavailable(symbol, reason):

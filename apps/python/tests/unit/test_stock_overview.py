@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from moopython.order_book import (BOOK_BUCKET_RANGE_FRACTION, auto_bucket_width, quote_reference,
+from moopython.order_book import (BOOK_BUCKET_RANGE_FRACTION, BOOK_BUCKETS_PER_SIDE,
+                                  auto_bucket_width, quote_reference,
                                   read_order_book, visible_price_buckets, visible_price_zones,
                                   visible_value_ratio)
 from moopython.stock_overview import build_overview
@@ -12,8 +13,10 @@ from moopython.stock_overview import build_overview
 class StockOverviewTests(unittest.TestCase):
     def test_price_buckets_use_thirty_percent_range_and_keep_outer_volume(self):
         self.assertEqual(BOOK_BUCKET_RANGE_FRACTION, 0.30)
+        self.assertEqual(BOOK_BUCKETS_PER_SIDE, 6)
         self.assertEqual(auto_bucket_width(100), 5)
         self.assertEqual(auto_bucket_width(1000), 50)
+        self.assertEqual(auto_bucket_width(216.4), 10.82)
         book=dict(status='ok', bids=[dict(price=499, volume=100), dict(price=699, volume=10),
                                      dict(price=700, volume=20), dict(price=749, volume=30),
                                      dict(price=750, volume=40)],
@@ -31,6 +34,31 @@ class StockOverviewTests(unittest.TestCase):
         finer=visible_price_buckets(book, 10, 1000)
         self.assertEqual(finer['width'],10)
         self.assertEqual(sum(x['volume'] for x in finer['bids']),200)
+
+    def test_auto_buckets_have_six_exact_five_percent_bands_per_side(self):
+        book=dict(status='ok', bids=[dict(price=700,volume=10),dict(price=749.99,volume=20),
+                                     dict(price=750,volume=30),dict(price=999,volume=40),
+                                     dict(price=500,volume=100)],
+                  asks=[dict(price=1000,volume=50),dict(price=1050,volume=60),
+                        dict(price=1299.99,volume=70),dict(price=1300,volume=80)])
+        buckets=visible_price_buckets(book,auto_bucket_width(1000),1000,
+                                      anchor_to_reference=True)
+        bids=[item for item in buckets['bids'] if item['kind']=='normal']
+        asks=[item for item in buckets['asks'] if item['kind']=='normal']
+        self.assertEqual(len(bids),6)
+        self.assertEqual(len(asks),6)
+        self.assertEqual([(item['low'],item['high']) for item in bids],
+                         [(950,1000),(900,950),(850,900),(800,850),(750,800),(700,750)])
+        self.assertEqual([(item['low'],item['high']) for item in asks],
+                         [(1000,1050),(1050,1100),(1100,1150),(1150,1200),
+                          (1200,1250),(1250,1300)])
+        self.assertEqual([item['volume'] for item in bids],[40,0,0,0,30,30])
+        self.assertEqual([item['volume'] for item in asks],[50,60,0,0,0,70])
+        self.assertEqual([item['volume'] for item in buckets['bids'] if item['kind']=='below'],[100])
+        self.assertEqual([item['volume'] for item in buckets['asks'] if item['kind']=='above'],[80])
+        odd=visible_price_buckets(dict(status='ok',bids=[dict(price=205.58,volume=1)],asks=[]),
+                                  auto_bucket_width(216.4),216.4,anchor_to_reference=True)
+        self.assertEqual((odd['bids'][0]['low'],odd['bids'][0]['high']),(205.58,216.4))
 
     def test_visible_value_ratio_uses_price_times_shares_across_all_returned_levels(self):
         book=dict(status='ok', bids=[dict(price=90, volume=1000), dict(price=80, volume=100)],

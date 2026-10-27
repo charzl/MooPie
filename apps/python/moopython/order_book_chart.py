@@ -5,7 +5,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel, QProgressBar,
                                QScrollArea, QVBoxLayout, QWidget)
 
-from .order_book import (BOOK_BUCKET_RANGE_FRACTION, auto_bucket_width, quote_reference,
+from .order_book import (BOOK_BUCKET_RANGE_FRACTION, BOOK_BUCKETS_PER_SIDE,
+                         auto_bucket_width, quote_reference,
                          visible_price_buckets, visible_price_zones, visible_value_ratio)
 
 
@@ -17,7 +18,11 @@ def price_range(zone):
 def bucket_label(bucket):
     if bucket['kind'] == 'below': return f'<${bucket["high"]:,.2f}'
     if bucket['kind'] == 'above': return f'≥${bucket["low"]:,.2f}'
-    return f'${bucket["low"]:,.2f}–<${bucket["high"]:,.2f}'
+    label = f'${bucket["low"]:,.2f}–<${bucket["high"]:,.2f}'
+    if 'percent_low' in bucket:
+        def percent(value): return f'{value:+g}%' if value else '0%'
+        return f'{percent(bucket["percent_low"])}–{percent(bucket["percent_high"])} · {label}'
+    return label
 
 
 class OrderBookChart(QScrollArea):
@@ -169,7 +174,7 @@ class OrderBookChart(QScrollArea):
                 amount.setMinimumWidth(94)
                 line.addWidget(label); line.addWidget(bar, 1); line.addWidget(amount)
                 self.body.addLayout(line)
-        if not buckets['bids'] and not buckets['asks']:
+        if not any(item['volume'] > 0 for side in ('bids', 'asks') for item in buckets[side]):
             self._label('No visible levels' if english else '暂无可见档位')
 
     def set_message(self, message, *, language='zh', theme='dark'):
@@ -212,26 +217,36 @@ class OrderBookChart(QScrollArea):
         controls.addWidget(QLabel('Bucket width' if english else '价格桶宽'))
         self.bucket_width = QComboBox()
         self.bucket_width.setAccessibleName('Bucket width' if english else '价格桶宽')
-        self.bucket_width.addItem('Auto' if english else '自动', 0)
+        self.bucket_width.addItem('Auto 5%' if english else '自动 5%', 0)
         for option in (1, 2, 5, 10, 20, 50, 100, 200):
             self.bucket_width.addItem(f'${option}', option)
         self.bucket_width.setCurrentIndex(self.bucket_width.findData(self.bucket_width_choice))
         self.bucket_width.currentIndexChanged.connect(self._bucket_width_changed)
         controls.addWidget(self.bucket_width); controls.addStretch()
         self.body.addLayout(controls)
-        buckets = visible_price_buckets(book, width, price)
+        auto_mode = self.bucket_width_choice == 0 and price is not None
+        buckets = visible_price_buckets(book, width, price, anchor_to_reference=auto_mode)
         if price is not None:
-            self._label((f'${width:g} per bucket · detail within ±{BOOK_BUCKET_RANGE_FRACTION:.0%} '
-                         f'(${buckets["lower"]:,.2f}–${buckets["upper"]:,.2f}); '
-                         'each outer range is one bucket.' if english else
-                         f'每桶 ${width:g} · 详细范围为参考价上下各 {BOOK_BUCKET_RANGE_FRACTION:.0%} '
-                         f'（${buckets["lower"]:,.2f}–${buckets["upper"]:,.2f}）；范围外各合并一桶。'), muted=True)
+            if auto_mode:
+                detail = (f'Auto: {BOOK_BUCKETS_PER_SIDE} buckets per side, 5% each '
+                          f'(≈${width:g}); detail ${buckets["lower"]:,.2f}–${buckets["upper"]:,.2f}. '
+                          'Outer ranges are grouped separately.' if english else
+                          f'自动分桶：参考价上下各 {BOOK_BUCKETS_PER_SIDE} 桶，每桶 5%（约 ${width:g}）；'
+                          f'详细范围 ${buckets["lower"]:,.2f}–${buckets["upper"]:,.2f}，范围外各合并一桶。')
+            else:
+                detail = (f'${width:g} per bucket · detail within ±{BOOK_BUCKET_RANGE_FRACTION:.0%} '
+                          f'(${buckets["lower"]:,.2f}–${buckets["upper"]:,.2f}); '
+                          'each outer range is one bucket.' if english else
+                          f'每桶 ${width:g} · 详细范围为参考价上下各 {BOOK_BUCKET_RANGE_FRACTION:.0%} '
+                          f'（${buckets["lower"]:,.2f}–${buckets["upper"]:,.2f}）；范围外各合并一桶。')
+            self._label(detail, muted=True)
         else:
             self._label((f'${width:g} per bucket · quote unavailable, so no outer range cutoff.' if english else
                          f'每桶 ${width:g} · 参考价不可用，暂不合并范围外价位。'), muted=True)
         for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
                             ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
-            most = max((bucket for bucket in buckets[side] if bucket['kind'] == 'normal'),
+            most = max((bucket for bucket in buckets[side]
+                        if bucket['kind'] == 'normal' and bucket['volume'] > 0),
                        key=lambda bucket: bucket['volume'], default=None)
             title = ('Largest bid bucket within detail range' if side == 'bids' else
                      'Largest ask bucket within detail range') if english else (
