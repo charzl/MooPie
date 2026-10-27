@@ -391,8 +391,19 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('最近买盘区间  $99.96–$100.00',text)
         self.assertIn('可见 400 股 · 合并 3 档 · 按挂单价估算约 $39,989 · 距常规时段最新成交价 0.10%',text)
         self.assertIn('最近卖盘区间  $100.12–$100.14',text)
+        self.assertIn('可见买卖盘金额比例',text)
+        self.assertIn('买盘 $79,869',text)
+        self.assertIn('卖盘 $40,164',text)
         self.assertIn('并非全市场买卖总量',text)
-        self.assertEqual(len(chart.findChildren(QProgressBar)),8)
+        self.assertIn('范围内买盘挂单最多的价格桶  $95.00–<$100.00',text)
+        self.assertIn('每桶 $5 · 详细范围为参考价上下各 30%',text)
+        self.assertEqual(len(chart.findChildren(QProgressBar)),12)
+        chart.bucket_width.setCurrentIndex(chart.bucket_width.findData(10))
+        self.app.processEvents()
+        text=' '.join(label.text() for label in chart.findChildren(QLabel))
+        self.assertIn('每桶 $10 · 详细范围为参考价上下各 30%',text)
+        self.assertIn('范围内买盘挂单最多的价格桶  $90.00–<$100.00',text)
+        self.assertEqual(chart.book,book)
 
     def test_distant_large_order_zone_is_visible_in_volume_ranking(self):
         book=dict(status='ok',depth=60,collected_at='2026-10-26T21:45:58+00:00',
@@ -408,11 +419,29 @@ class ResearchUiTests(unittest.TestCase):
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
         self.assertIn('已返回档位中挂单股数最多的区间',text)
+        self.assertIn('范围内买盘挂单最多的价格桶  $95.00–<$100.00',text)
+        self.assertIn('范围内卖盘挂单最多的价格桶  $105.00–<$110.00',text)
         self.assertIn('$95.00  (5.00%)',text)
         self.assertIn('$105.00  (5.00%)',text)
         self.assertIn('100,000',text)
         self.assertIn('90,000',text)
         self.assertIn('柱长表示挂单股数，不是订单笔数或成交金额',text)
+
+    def test_far_outer_bucket_is_visible_without_becoming_main_price_zone(self):
+        book=dict(status='ok',depth=60,collected_at='2026-10-26T21:45:58+00:00',
+                  bids=[dict(price=499,volume=8000),dict(price=850,volume=3000)],
+                  asks=[dict(price=1150,volume=5000),dict(price=1600,volume=9000)])
+        chart=self.window.order_book_result
+        chart.set_book(book,dict(last_price=1000,update_time='2026-10-26 10:00:00'),
+                       language='zh',theme='dark')
+        self.app.processEvents()
+        text=' '.join(label.text() for label in chart.findChildren(QLabel))
+        self.assertIn('范围内买盘挂单最多的价格桶  $850.00–<$900.00',text)
+        self.assertIn('范围内卖盘挂单最多的价格桶  $1,150.00–<$1,200.00',text)
+        self.assertIn('<$700.00',text)
+        self.assertIn('≥$1,300.00',text)
+        self.assertIn('8,000 股',text)
+        self.assertIn('9,000 股',text)
 
     def test_after_hours_order_book_compares_with_after_price_and_labels_regular_last(self):
         book=dict(status='ok', depth=10, collected_at='2026-10-26T21:45:58+00:00',

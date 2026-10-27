@@ -3,11 +3,44 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from moopython.order_book import quote_reference, read_order_book, visible_price_zones
+from moopython.order_book import (BOOK_BUCKET_RANGE_FRACTION, auto_bucket_width, quote_reference,
+                                  read_order_book, visible_price_buckets, visible_price_zones,
+                                  visible_value_ratio)
 from moopython.stock_overview import build_overview
 
 
 class StockOverviewTests(unittest.TestCase):
+    def test_price_buckets_use_thirty_percent_range_and_keep_outer_volume(self):
+        self.assertEqual(BOOK_BUCKET_RANGE_FRACTION, 0.30)
+        self.assertEqual(auto_bucket_width(100), 5)
+        self.assertEqual(auto_bucket_width(1000), 50)
+        book=dict(status='ok', bids=[dict(price=499, volume=100), dict(price=699, volume=10),
+                                     dict(price=700, volume=20), dict(price=749, volume=30),
+                                     dict(price=750, volume=40)],
+                  asks=[dict(price=1299, volume=50), dict(price=1300, volume=60),
+                        dict(price=1500, volume=70)])
+        buckets=visible_price_buckets(book, 50, 1000)
+        self.assertEqual((buckets['lower'],buckets['upper']), (700,1300))
+        self.assertEqual([(x['kind'],x['volume']) for x in buckets['bids']],
+                         [('normal',40),('normal',50),('below',110)])
+        self.assertEqual([(x['kind'],x['volume']) for x in buckets['asks']],
+                         [('normal',50),('above',130)])
+        self.assertEqual(sum(x['volume'] for x in buckets['bids']),200)
+        self.assertEqual(sum(x['notional'] for x in buckets['asks']),
+                         sum(row['price']*row['volume'] for row in book['asks']))
+        finer=visible_price_buckets(book, 10, 1000)
+        self.assertEqual(finer['width'],10)
+        self.assertEqual(sum(x['volume'] for x in finer['bids']),200)
+
+    def test_visible_value_ratio_uses_price_times_shares_across_all_returned_levels(self):
+        book=dict(status='ok', bids=[dict(price=90, volume=1000), dict(price=80, volume=100)],
+                  asks=[dict(price=110, volume=900), dict(price=120, volume=50)])
+        ratio=visible_value_ratio(book)
+        self.assertEqual((ratio['bid_value'], ratio['ask_value']), (98000, 105000))
+        self.assertAlmostEqual(ratio['bid_to_ask'], 98000/105000)
+        self.assertAlmostEqual(ratio['bid_share']+ratio['ask_share'], 1)
+        self.assertEqual(visible_value_ratio(dict(status='ok', bids=book['bids'], asks=[]))['status'], 'insufficient')
+
     def test_order_book_uses_session_price_without_replacing_regular_last_price(self):
         quote = dict(last_price=216, after_price=216.4288, pre_price=211,
                      update_time='2026-10-26 17:45:57.947')
