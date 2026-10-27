@@ -1,13 +1,16 @@
 """Compact Qt chart for nearby visible bid and ask price ranges."""
+from datetime import datetime, timedelta
 from math import isfinite
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel, QProgressBar,
                                QScrollArea, QVBoxLayout, QWidget)
 
 from .order_book import (BOOK_BUCKET_RANGE_FRACTION, BOOK_BUCKETS_PER_SIDE,
                          auto_bucket_width, quote_reference,
                          visible_price_buckets, visible_price_zones, visible_value_ratio)
+from .depth_timeline import bucket_timeline
 
 
 def price_range(zone):
@@ -25,6 +28,54 @@ def bucket_label(bucket):
     return label
 
 
+class DepthTimelinePlot(QWidget):
+    """Actual samples only; long gaps are left disconnected."""
+    def __init__(self, series, now, theme, parent=None):
+        super().__init__(parent)
+        self.series, self.now, self.theme = series, now, theme
+        self.setFixedHeight(118)
+        self.setMinimumWidth(250)
+        self.setAccessibleName('近 15 分钟可见买卖盘挂单金额采样曲线')
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        muted = QColor('#949bad' if self.theme == 'dark' else '#58677b')
+        left, right, top, bottom = 35, 12, 12, 25
+        width = max(1, self.width()-left-right)
+        height = max(1, self.height()-top-bottom)
+        cutoff = self.now - timedelta(minutes=15)
+        values = [point['value'] for item in self.series.values()
+                  for point in item['windows'][-1]['points']]
+        maximum = max(values, default=1) or 1
+        painter.setPen(QPen(muted, 1))
+        for minutes in (15, 10, 5, 0):
+            x = left+width*(15-minutes)/15
+            painter.drawLine(QPointF(x, top), QPointF(x, top+height))
+            painter.drawText(QRectF(x-19, top+height+3, 38, 16),
+                             Qt.AlignmentFlag.AlignCenter, f'-{minutes}m' if minutes else 'now')
+        painter.drawText(QRectF(0, top-2, left-3, 20), Qt.AlignmentFlag.AlignRight,
+                         f'{maximum/1000:.0f}k' if maximum >= 1000 else f'{maximum:.0f}')
+        for side, code in (('bids', '#48d67f' if self.theme == 'dark' else '#167a3e'),
+                           ('asks', '#ff7777' if self.theme == 'dark' else '#bd3030')):
+            item = self.series.get(side)
+            if not item: continue
+            points = []
+            for sample in item['windows'][-1]['points']:
+                stamp = datetime.fromisoformat(sample['time'])
+                x = left+width*(stamp-cutoff).total_seconds()/900
+                y = top+height*(1-sample['value']/maximum)
+                points.append((stamp, QPointF(x, y)))
+            painter.setPen(QPen(QColor(code), 2))
+            for previous, current in zip(points, points[1:]):
+                if (current[0]-previous[0]).total_seconds() <= 75:
+                    painter.drawLine(previous[1], current[1])
+            painter.setBrush(QColor(code))
+            for _, point in points:
+                painter.drawEllipse(point, 2.5, 2.5)
+        painter.end()
+
+
 class OrderBookChart(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +88,7 @@ class OrderBookChart(QScrollArea):
         self.setWidget(self.content)
         self.book = None
         self.quote = None
+        self.history = []
         self.language = 'zh'
         self.theme = 'dark'
         self.bucket_width_choice = 0
@@ -137,7 +189,51 @@ class OrderBookChart(QScrollArea):
         if choice is None or choice == self.bucket_width_choice:
             return
         self.bucket_width_choice = choice
-        self.set_book(self.book, self.quote, language=self.language, theme=self.theme)
+        self.set_book(self.book, self.quote, language=self.language, theme=self.theme,
+                      history=self.history)
+
+    def _timeline_section(self, book, quote, *, english, theme):
+        self._label('Visible depth over time' if english else '挂单随时间变化', large=True)
+        if len(self.history) < 2:
+            self._label('Fewer than two sampled snapshots; keep this stock detail open to collect observations.' if english else
+                        '目前少于两次实际采样；保持个股详情开启，可继续记录盘口。', muted=True)
+            return
+        now = datetime.fromisoformat(book['collected_at'])
+        series = bucket_timeline(self.history, book, quote, now=now)
+        if not series:
+            self._label('No comparable price bucket.' if english else '暂无可比较的价格桶。', muted=True)
+            return
+        self._label('Past 15 minutes · green bid / red ask · visible limit-order value ($)' if english else
+                    '近 15 分钟采样曲线 · 绿买／红卖 · 纵轴为可见挂单金额（美元）', muted=True)
+        self.body.addWidget(DepthTimelinePlot(series, now, theme))
+        for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
+                            ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
+            item = series.get(side)
+            if not item:
+                continue
+            side_label = ('Bid' if side == 'bids' else 'Ask') if english else ('买盘' if side == 'bids' else '卖盘')
+            self._label(side_label + ' · ' + bucket_label(item['bucket']))
+            maximum = max((window['average'] or 0 for window in item['windows']), default=1) or 1
+            for window in item['windows']:
+                if window['samples'] < 2:
+                    self._label((f'Past {window["minutes"]} min: {window["samples"]} sample, insufficient for change' if english else
+                                 f'近 {window["minutes"]} 分钟：{window["samples"]} 次采样，不能判断变化'), muted=True)
+                    continue
+                line = QHBoxLayout()
+                label = QLabel(f'{window["minutes"]} min' if english else f'{window["minutes"]} 分钟')
+                label.setMinimumWidth(58)
+                bar = QProgressBar(); bar.setRange(0, max(1, int(maximum)))
+                bar.setValue(int(window['average'])); bar.setTextVisible(False); bar.setFixedHeight(16)
+                track = '#303542' if theme == 'dark' else '#dce4ed'
+                bar.setStyleSheet(f'QProgressBar{{border:0;border-radius:5px;background:{track};}}'
+                                  f'QProgressBar::chunk{{background:{color};border-radius:5px;}}')
+                amount = QLabel((f'avg ≈${window["average"]:,.0f} · {window["samples"]} samples' if english else
+                                 f'平均约 ${window["average"]:,.0f} · {window["samples"]} 次'))
+                amount.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                line.addWidget(label); line.addWidget(bar, 1); line.addWidget(amount)
+                self.body.addLayout(line)
+        self._label('Each bar is the sampled mean limit-order value in the current largest-share bucket; sparse samples and cancelled orders do not prove executions.' if english else
+                    '柱长是当前挂单股数最多的价格桶在该时段各次采样的平均挂单金额；采样可能稀疏，挂单消失不等于成交。', muted=True)
 
     def _bucket_section(self, buckets, *, english, theme):
         self._label('Visible shares by price bucket' if english else '各价格桶的可见挂单股数', large=True)
@@ -170,6 +266,7 @@ class OrderBookChart(QScrollArea):
     def set_message(self, message, *, language='zh', theme='dark'):
         self.book = None
         self.quote = None
+        self.history = []
         self.language = language
         self.theme = theme
         self._clear()
@@ -177,8 +274,9 @@ class OrderBookChart(QScrollArea):
         self._label(message)
         self.body.addStretch()
 
-    def set_book(self, book, quote=None, *, language='zh', theme='dark'):
+    def set_book(self, book, quote=None, *, language='zh', theme='dark', history=None):
         self.book, self.quote, self.language, self.theme = book, quote, language, theme
+        self.history = history if history is not None else []
         self._clear()
         english = language == 'en'
         self._label('Visible Order Book' if english else '当前可见买卖盘', large=True)
@@ -243,6 +341,7 @@ class OrderBookChart(QScrollArea):
                 '范围内买盘挂单最多的价格桶' if side == 'bids' else '范围内卖盘挂单最多的价格桶')
             self._bucket_summary(most, title, color, english=english)
         self._value_ratio(book, english=english, theme=theme)
+        self._timeline_section(book, quote, english=english, theme=theme)
         self._bucket_section(buckets, english=english, theme=theme)
         zones = visible_price_zones(book, price)
         strongest = {side: sorted(zones[side], key=lambda zone: (-zone['volume'],

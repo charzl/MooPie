@@ -14,6 +14,15 @@ CREATE TABLE buy_alerts (
 , confirmation_mode TEXT NOT NULL DEFAULT 'quote'
     CHECK (confirmation_mode IN ('quote', 'daily_close')), entered_at TEXT NOT NULL DEFAULT '', last_bar_date TEXT NOT NULL DEFAULT '');
 
+CREATE TABLE order_book_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    quote_time TEXT,
+    payload TEXT NOT NULL,
+    UNIQUE(symbol, collected_at)
+);
+
 CREATE TABLE paper_clients (
     experiment_id INTEGER NOT NULL REFERENCES paper_experiments(id),
     client_id TEXT NOT NULL,
@@ -121,6 +130,9 @@ CREATE TABLE watchlist (
     source TEXT NOT NULL
 );
 
+CREATE INDEX order_book_history_symbol_time
+    ON order_book_history(symbol, collected_at DESC);
+
 CREATE INDEX paper_fills_experiment_date ON paper_fills(experiment_id,session_date);
 
 CREATE INDEX paper_inputs_experiment ON paper_inputs(experiment_id,id);
@@ -143,4 +155,4 @@ CREATE INDEX snapshot_retention ON snapshots(fetched_at);
 CREATE INDEX snapshot_symbol_time
     ON snapshots(symbol, operation, session_date, fetched_at DESC);
 
-PRAGMA user_version=8;
+PRAGMA user_version=9;

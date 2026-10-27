@@ -12,7 +12,7 @@ from .research import analyze_put_dataset, run_research
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Single-stock or Watchlist research')
-    parser.add_argument('action', choices=['overview', 'radar', 'put', 'trend', 'add', 'sync-directory', 'alerts'])
+    parser.add_argument('action', choices=['overview', 'radar', 'put', 'trend', 'depth', 'add', 'sync-directory', 'alerts'])
     parser.add_argument('symbol', nargs='?')
     parser.add_argument('--watchlist', type=Path, help='Research this JSON instead of the database Watchlist; read-only input')
     parser.add_argument('--port', type=int, default=11111)
@@ -34,6 +34,35 @@ def main(argv=None):
         elif output_stream is not None: print(document,file=output_stream)
     if sys.stderr is None: sys.stderr = open(os.devnull, 'w', encoding='utf-8')
     try:
+        if args.action == 'depth':
+            if not args.symbol or args.input or args.watchlist or args.config or args.saved or args.depth:
+                raise ValueError('depth requires one stock symbol only')
+            from .market_collection import us_symbols
+            from .order_book import read_order_book
+            from .order_book_history import OrderBookHistory
+            code = us_symbols([args.symbol])[0]
+            quote = None
+            quote_error = None
+            with redirect_stdout(sys.stderr):
+                try:
+                    with market_data_connection(port=args.port, update=True,
+                                                max_age_seconds=args.max_age_seconds) as service:
+                        quote = next(row for row in service.snapshots([code])['rows'] if row['code'] == code)
+                except Exception as error:
+                    quote_error = str(error)
+                book = read_order_book(code, args.port)
+            history_store = OrderBookHistory()
+            try:
+                history_store.save(book, quote)
+                history = history_store.recent(code)
+            except (OSError, RuntimeError, ValueError, KeyError) as error:
+                history, history_error = [], str(error)
+            else:
+                history_error = None
+            emit(dict(action='depth', symbol=code, quote=quote, quote_error=quote_error,
+                      order_book=book, order_book_history=history,
+                      order_book_history_error=history_error))
+            return 0
         if args.action == 'alerts':
             if args.symbol or args.input or args.watchlist or args.config or args.depth:
                 raise ValueError('alerts polls armed stocks from SQLite only')
@@ -97,12 +126,20 @@ def main(argv=None):
                             if signal['status'] == 'ok':
                                 signal['multi_timeframe'] = timeframe_levels(
                                     series, signal, daily.get('decision_cutoff') or daily.get('fetched_at'))
+                                result['chart_bars'] = series['bars']
                             result['price_signals'] = {code: signal}
                 except Exception as error:
                     result['quote_error'] = str(error)
                     if result.get('trend', {}).get('status') != 'ok':
                         result['price_signals'] = {code: unavailable(code, result['trend'].get('error', str(error)))}
                 result['order_book'] = read_order_book(args.symbol, args.port)
+                from .order_book_history import OrderBookHistory
+                try:
+                    history_store = OrderBookHistory()
+                    history_store.save(result['order_book'], result.get('quote'))
+                    result['order_book_history'] = history_store.recent(code)
+                except (OSError, RuntimeError, ValueError, KeyError) as error:
+                    result['order_book_history_error'] = str(error)
                 try:
                     signal = result.get('price_signals', {}).get(code)
                     store = PriceSignalStore()

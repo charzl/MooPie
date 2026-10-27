@@ -367,6 +367,13 @@ class ResearchUiTests(unittest.TestCase):
         signal = self.window.results['trend']['price_signals']['US.TEST']
         self.assertEqual(signal['status'], 'ok')
         self.assertEqual(signal['multi_timeframe']['status'], 'ok')
+        self.assertTrue(self.window.support_chart.bars)
+        self.assertEqual(len(self.window.support_chart.zones),
+                         len(signal['support_zones']) + len(signal['resistance_zones']) +
+                         sum(len(period['support_zones']) + len(period['resistance_zones'])
+                             for period in signal['multi_timeframe']['periods'].values()
+                             if period['status'] == 'ok'))
+        self.assertIn('数据时间', self.window.detail_data_state.text())
         self.assertIn('日线、周线与月线价位', self.window.price_signal_result.toPlainText())
         self.assertIn('周线', self.window.timeframe_summary.text())
         self.assertEqual(PriceSignalStore().latest('US.TEST')['signal'], signal)
@@ -408,6 +415,36 @@ class ResearchUiTests(unittest.TestCase):
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
         self.assertIn('自动分桶：参考价上下各 6 桶，每桶 5%',text)
+
+    def test_confirmed_support_is_drawn_over_daily_bars_with_pivot_evidence(self):
+        zone = dict(low=95.0, high=99.0, independent_touches=1,
+                    evidence=[dict(date='2026-10-22', confirmed_at='2026-10-24', price=96.0)])
+        signal = dict(status='ok', as_of='2026-10-24', reference=dict(time='2026-10-26 10:00:00'),
+                      support_zones=[zone], resistance_zones=[])
+        bars = [dict(date=f'2026-10-{day}', open=100, high=105, low=94, close=101, volume=1000)
+                for day in (22, 23, 24)]
+        self.window.show_support_chart(dict(symbol='US.TEST', chart_bars=bars,
+                                             price_signals={'US.TEST': signal}))
+        chart = self.window.support_chart
+        chart.resize(600, 300)
+        chart.render_plot()
+        self.assertEqual(len(chart.bars), 3)
+        self.assertEqual(len(chart.zones), 1)
+        self.assertIn('确认 2026-10-24', chart.zone_hits[0][1])
+
+    def test_order_book_history_draws_sample_timeline(self):
+        from moopython.order_book_chart import DepthTimelinePlot
+        earlier = dict(status='ok', symbol='US.TEST', depth=60,
+                       collected_at='2026-10-26T21:44:30+00:00',
+                       bids=[dict(price=97, volume=10)], asks=[dict(price=103, volume=10)])
+        latest = dict(earlier, collected_at='2026-10-26T21:45:00+00:00',
+                      bids=[dict(price=97, volume=20)])
+        history = [dict(collected_at=book['collected_at'], book=book) for book in (earlier, latest)]
+        chart = self.window.order_book_result
+        chart.set_book(latest, dict(last_price=100), history=history)
+        self.app.processEvents()
+        self.assertEqual(len(chart.findChildren(DepthTimelinePlot)), 1)
+        self.assertIn('平均约', ' '.join(label.text() for label in chart.findChildren(QLabel)))
 
     def test_distant_large_order_zone_is_visible_in_volume_ranking(self):
         book=dict(status='ok',depth=60,collected_at='2026-10-26T21:45:58+00:00',

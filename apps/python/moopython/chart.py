@@ -1,7 +1,7 @@
 """Qt raster chart: cached plot, lightweight crosshair overlay, no idle redraw timer."""
 from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF, QPixmap, QFont
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QToolTip, QWidget
 from .market import averages, compact
 
 BG = "#15161b"
@@ -24,6 +24,8 @@ class CandleChart(QWidget):
         self.message = ""
         self.cache = None
         self.metrics = None
+        self.zones = []
+        self.zone_hits = []
         self.setMouseTracking(True)
         self.setMinimumSize(400, 280)
 
@@ -31,6 +33,24 @@ class CandleChart(QWidget):
         self.bars = bars
         if period:
             self.period = period
+        self.invalidate()
+
+    def set_zones(self, signal):
+        """Overlay confirmed daily/weekly/monthly regions on a daily chart."""
+        zones = []
+        if signal and signal.get('status') == 'ok':
+            periods = [('日线', signal)]
+            multi = signal.get('multi_timeframe') or {}
+            if multi.get('status') == 'ok':
+                periods.extend((name, multi.get('periods', {}).get(key, {}))
+                               for name, key in (('周线', 'week'), ('月线', 'month')))
+            for name, source in periods:
+                if source.get('status') != 'ok':
+                    continue
+                for side, field in (('support', 'support_zones'), ('resistance', 'resistance_zones')):
+                    for zone in source.get(field, [])[:3]:
+                        zones.append((name, side, zone))
+        self.zones = zones
         self.invalidate()
 
     def invalidate(self):
@@ -53,6 +73,14 @@ class CandleChart(QWidget):
         self.hover = None
         self.update()
 
+    def mousePressEvent(self, event):
+        for rectangle, description in reversed(self.zone_hits):
+            if rectangle.contains(event.position()):
+                QToolTip.showText(event.globalPosition().toPoint(), description, self)
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
     def resizeEvent(self, event):
         self.cache = None
         super().resizeEvent(event)
@@ -71,6 +99,7 @@ class CandleChart(QWidget):
         p.setFont(QFont("Menlo", 9))
         bars = self.bars[-self.visible_count:]
         self.metrics = None
+        self.zone_hits = []
         if not bars:
             p.end()
             return pixmap
@@ -101,6 +130,35 @@ class CandleChart(QWidget):
             self.text(p, label_x, self.height()-12, value, width=62,
                       align=Qt.AlignmentFlag.AlignLeft if i == 0 else Qt.AlignmentFlag.AlignRight if i == 6 else Qt.AlignmentFlag.AlignHCenter)
             p.setPen(QPen(QColor("#242630"), .6))
+        for period, side, zone in reversed(self.zones):
+            zone_low, zone_high = zone['low'], zone['high']
+            if zone_high < low or zone_low > high:
+                continue
+            top_y, bottom_y = y(min(zone_high, high)), y(max(zone_low, low))
+            rectangle = QRectF(left, top_y, width, max(2, bottom_y-top_y))
+            color = QColor('#32b873' if side == 'support' else '#e26060')
+            color.setAlpha({'日线': 50, '周线': 31, '月线': 20}[period])
+            p.fillRect(rectangle, color)
+            edge = QColor('#32b873' if side == 'support' else '#e26060')
+            p.setPen(QPen(edge, 1, Qt.PenStyle.SolidLine if period == '日线' else Qt.PenStyle.DashLine))
+            p.drawLine(QPointF(left, top_y), QPointF(left+width, top_y))
+            evidence = zone.get('evidence', [])
+            dates = '、'.join(f'{item.get("date", "?")}（确认 {item.get("confirmed_at", "?")}）'
+                             for item in evidence) or '没有逐日转折记录'
+            description = (f'{period}{"支撑" if side == "support" else "阻力"} '
+                           f'${zone_low:,.2f}–${zone_high:,.2f}\n'
+                           f'{zone.get("independent_touches", len(evidence))} 次转折：{dates}')
+            self.zone_hits.append((rectangle, description))
+            if period == '日线':
+                for item in evidence:
+                    index = next((i for i, bar in enumerate(bars) if bar.time[:10] == item.get('date')), None)
+                    if index is not None and low <= item.get('price', -1) <= high:
+                        p.setBrush(edge)
+                        p.drawEllipse(QPointF(x(index), y(item['price'])), 3, 3)
+                        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QColor(MUTED))
+        p.drawText(QRectF(left, 17, width, 18), Qt.AlignmentFlag.AlignRight,
+                   '绿色支撑 / 红色阻力 · 实线日线 / 虚线周月线 · 点击色带看转折依据' if self.zones else '')
         if self.line_mode:
             p.setPen(QPen(QColor("#21c9e9"), 1.3))
             p.drawPolyline(QPolygonF([QPointF(x(i), y(b.close)) for i, b in enumerate(bars)]))

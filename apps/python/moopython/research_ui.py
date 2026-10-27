@@ -27,6 +27,9 @@ from .buy_plan import calculate_plan
 from .buy_alert_store import BuyAlertStore
 from .security_directory import SecurityDirectory
 from .order_book_chart import OrderBookChart
+from .chart import CandleChart
+from .market import Candle
+from .data_status import detail_data_status
 from .desktop_preferences import DesktopPreferences
 from .paper_ui import PaperPanel
 from .desktop_widgets import SelectBox
@@ -76,6 +79,7 @@ class ResearchWindow(QMainWindow):
         self.watchlist = WatchlistStore()
         self.buy_alerts = BuyAlertStore()
         self.alert_process = None
+        self.depth_process = None
         try:
             saved_config = self.settings.value('put_recommendation_configuration_v1', '')
             self.configuration = load_rules().recommendation_configuration(json.loads(saved_config) if saved_config else None)
@@ -163,7 +167,7 @@ class ResearchWindow(QMainWindow):
         self.put_button = QPushButton('筛选卖出 Put'); self.put_button.setObjectName('primary')
         self.trend_button = QPushButton('分析走势')
         self.put_button.clicked.connect(lambda: self.start('put'))
-        self.trend_button.clicked.connect(lambda: self.start('trend'))
+        self.trend_button.clicked.connect(lambda: self.start('trend', depth=bool(self.symbol.text().strip())))
         controls.addWidget(self.put_button)
         self.refresh_button = QToolButton()
         self.refresh_button.setProperty('splitMenu',True)
@@ -275,6 +279,8 @@ class ResearchWindow(QMainWindow):
         self.put_result = QTextBrowser(); self.trend_result = QTextBrowser()
         self.price_signal_result = QTextBrowser()
         self.order_book_result = OrderBookChart()
+        self.support_chart = CandleChart()
+        self.support_chart.message = '选择个股后显示已完成日线及支撑阻力区。'
         for panel in (self.put_result, self.trend_result, self.price_signal_result):
             panel.setOpenExternalLinks(False)
         self.tabs.addTab(self.ranking_card, '推荐与候选')
@@ -328,14 +334,25 @@ class ResearchWindow(QMainWindow):
         self.timeframe_summary = QLabel('周线与月线价位会在个股分析后显示。')
         self.timeframe_summary.setWordWrap(True)
         technical_layout.addWidget(self.timeframe_summary)
+        self.detail_data_state = QLabel('报价、盘口与日线时间将在个股详情显示。')
+        self.detail_data_state.setWordWrap(True)
+        technical_layout.addWidget(self.detail_data_state)
         technical_content = QSplitter(Qt.Orientation.Vertical)
-        price_and_depth = QSplitter(Qt.Orientation.Horizontal)
-        price_and_depth.addWidget(self.price_signal_result)
-        price_and_depth.addWidget(self.order_book_result)
-        price_and_depth.setStretchFactor(0,1); price_and_depth.setStretchFactor(1,1)
-        technical_content.addWidget(price_and_depth)
+        chart_and_details = QSplitter(Qt.Orientation.Horizontal)
+        self.support_chart.setMinimumSize(320, 240)
+        self.depth_tabs = QTabWidget()
+        self.depth_tabs.setMinimumWidth(260)
+        self.depth_tabs.addTab(self.price_signal_result, '支撑阻力详情')
+        self.depth_tabs.addTab(self.order_book_result, '买卖盘变化')
+        chart_and_details.addWidget(self.support_chart)
+        chart_and_details.addWidget(self.depth_tabs)
+        chart_and_details.setStretchFactor(0, 3)
+        chart_and_details.setStretchFactor(1, 2)
+        chart_and_details.setSizes([620, 500])
+        technical_content.addWidget(chart_and_details)
         technical_content.addWidget(self.trend_result)
-        technical_content.setStretchFactor(0,2); technical_content.setStretchFactor(1,1)
+        technical_content.setStretchFactor(0,4); technical_content.setStretchFactor(1,1)
+        technical_content.setSizes([400, 180])
         technical_layout.addWidget(technical_content,1)
         self.tabs.addTab(technical_page, '技术面依据')
         self.paper_panel = PaperPanel(self)
@@ -392,6 +409,9 @@ class ResearchWindow(QMainWindow):
         self.alert_timer.setInterval(60000)
         self.alert_timer.timeout.connect(self.poll_buy_alerts)
         self.alert_timer.start()
+        self.depth_timer = QTimer(self)
+        self.depth_timer.setInterval(30000)
+        self.depth_timer.timeout.connect(self.poll_depth)
         if auto_load: QTimer.singleShot(0, self.initial_watchlist)
 
     def initial_watchlist(self):
@@ -422,7 +442,9 @@ class ResearchWindow(QMainWindow):
             except (OSError, RuntimeError): pass
         if self.order_book_result.book:
             self.order_book_result.set_book(self.order_book_result.book, self.order_book_result.quote,
-                                            language=value, theme=self.ui.effective_theme)
+                                            language=value, theme=self.ui.effective_theme,
+                                            history=self.order_book_result.history)
+        if self.results.get('trend'): self.show_detail_data_status(self.results['trend'])
 
     def change_theme(self, value):
         self.ui.set_theme(value)
@@ -435,7 +457,9 @@ class ResearchWindow(QMainWindow):
             except (OSError, RuntimeError): pass
         if self.order_book_result.book:
             self.order_book_result.set_book(self.order_book_result.book, self.order_book_result.quote,
-                                            language=self.ui.language, theme=self.ui.effective_theme)
+                                            language=self.ui.language, theme=self.ui.effective_theme,
+                                            history=self.order_book_result.history)
+        if self.results.get('trend'): self.show_detail_data_status(self.results['trend'])
         for index, row in enumerate(self.results.get('overview', {}).get('rows', [])):
             color = self.change_color(row.get('change_pct'))
             for column in (1, 2):
@@ -631,6 +655,100 @@ class ResearchWindow(QMainWindow):
         finally:
             process.deleteLater(); self.alert_process = None
 
+    def poll_depth(self):
+        if self.depth_process is not None or self.process is not None:
+            return
+        if (self.main_tabs.currentIndex() != 0 or self.analysis_stack.currentIndex() != 1
+                or self.tabs.currentIndex() != 2):
+            return
+        symbol = self.results.get('trend', {}).get('symbol')
+        if not symbol or not self.order_book_result.book:
+            return
+        path = Path(self.workspace.name) / 'depth.json'
+        path.unlink(missing_ok=True)
+        process = QProcess(self)
+        self.depth_process = process
+        process.finished.connect(lambda code, _status: self.depth_poll_finished(code, path, symbol))
+        process.errorOccurred.connect(self.depth_poll_error)
+        args = (['research'] if getattr(sys, 'frozen', False) else ['-X', 'utf8', '-m', 'moopython.research_cli'])
+        process.start(sys.executable, [*args, 'depth', symbol, '--port', str(self.port.value()),
+                                       '--output', str(path)])
+
+    def depth_poll_error(self, error):
+        if error == QProcess.ProcessError.FailedToStart and self.depth_process:
+            self.ui.set_text(self.detail_data_state,
+                             '盘口跟踪未启动：' + self.depth_process.errorString())
+            self.depth_process.deleteLater(); self.depth_process = None
+
+    def depth_poll_finished(self, exit_code, path, symbol):
+        process = self.depth_process
+        if process is None: return
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+            if exit_code or payload.get('error'):
+                raise ValueError(payload.get('error', f'盘口查询进程退出：{exit_code}'))
+            result = self.results.get('trend', {})
+            if result.get('symbol') != symbol or self.analysis_stack.currentIndex() != 1:
+                return
+            result['order_book'] = payload['order_book']
+            result['order_book_history'] = payload.get('order_book_history', [])
+            result['order_book_history_error'] = payload.get('order_book_history_error')
+            if payload.get('quote'):
+                result['quote'] = payload['quote']
+            result['quote_error'] = payload.get('quote_error')
+            self.order_book_result.set_book(result['order_book'], result.get('quote'),
+                                            language=self.ui.language, theme=self.ui.effective_theme,
+                                            history=result['order_book_history'])
+            self.show_detail_data_status(result)
+        except (OSError, ValueError, KeyError) as error:
+            self.ui.set_text(self.detail_data_state, '盘口跟踪失败：' + str(error))
+        finally:
+            process.deleteLater(); self.depth_process = None
+
+    def show_detail_data_status(self, result):
+        signal = result.get('price_signals', {}).get(result.get('symbol'))
+        status = detail_data_status(result.get('quote'), result.get('order_book'), signal)
+        english = self.ui.language == 'en'
+        labels = {'regular': 'regular', 'pre': 'pre-market', 'after': 'after-hours',
+                  'overnight': 'overnight'} if english else {
+                  'regular': '常规交易', 'pre': '盘前', 'after': '盘后', 'overnight': '夜盘'}
+        if english:
+            message = (f'Data times · quote (New York): {status["quote_time"] or "unknown"} '
+                       f'[{labels.get(status["session"], "unknown")}] · '
+                       f'book captured (UTC): {status["book_time"] or "unknown"} · '
+                       f'daily through: {status["daily_date"] or "unknown"}. '
+                       + ('Check source times and session; exact book freshness is unverified.'
+                          if status['issues'] else 'Source times appear aligned.'))
+        else:
+            message = (f'数据时间 · 报价（纽约）：{status["quote_time"] or "未知"}'
+                       f'［{labels.get(status["session"], "未知时段")}］ · '
+                       f'盘口采集（UTC）：{status["book_time"] or "未知"} · '
+                       f'日线截至：{status["daily_date"] or "未知"}。'
+                       + ('需核对：' + '；'.join(status['issues']) if status['issues'] else '时间基本对齐。'))
+            if signal and signal.get('status') == 'ok' and signal.get('reference', {}).get('time') != status['quote_time']:
+                message += ' 支撑阻力距离仍基于上次分析时的报价；刷新个股分析可更新。'
+        if result.get('quote_error'):
+            message += (' Quote error: ' if english else ' 报价错误：') + str(result['quote_error'])
+        if result.get('order_book_history_error'):
+            message += (' History error: ' if english else ' 盘口历史错误：') + str(result['order_book_history_error'])
+        color = '#d5a031' if status['issues'] else '#32b873'
+        self.detail_data_state.setStyleSheet(f'color:{color};font-weight:600;')
+        self.ui.set_text(self.detail_data_state, message)
+
+    def show_support_chart(self, result):
+        signal = result.get('price_signals', {}).get(result.get('symbol'))
+        rows = result.get('chart_bars') or []
+        if signal and signal.get('status') == 'ok' and rows:
+            self.support_chart.message = ''
+            self.support_chart.set_bars([Candle(row['date'], row['open'], row['high'], row['low'],
+                                                row['close'], row.get('volume') or 0) for row in rows], '日K')
+            self.support_chart.set_zones(signal)
+        else:
+            self.support_chart.set_bars([])
+            self.support_chart.set_zones(None)
+            self.support_chart.message = ('已验证日线不足，暂不能绘制支撑阻力图。' if self.ui.language == 'zh' else
+                                          'Validated daily bars unavailable; support chart cannot be shown.')
+
     def open_overview_row(self, row, _column):
         item = self.overview_table.item(row, 0)
         if item: self.open_stock(item.data(Qt.ItemDataRole.UserRole))
@@ -713,6 +831,7 @@ class ResearchWindow(QMainWindow):
 
     def search_watchlist(self):
         if self.process is not None: return
+        self.depth_timer.stop()
         self.symbol.clear()
         self.update_watchlist_label()
         self.analysis_stack.setCurrentIndex(0)
@@ -731,11 +850,16 @@ class ResearchWindow(QMainWindow):
             self.ui.set_text(self.status, '无法打开 Watchlist：' + str(error), 'setText')
 
     def reset_panels(self):
+        if hasattr(self, 'depth_timer'): self.depth_timer.stop()
         self.results.clear()
         self.put_dataset = None
         self.ui.set_text(self.scope_heading,'分析 · '+(self.symbol.text().strip().upper() or 'Watchlist'))
         self.ui.set_text(self.price_signal_result, signals_html({}), 'setHtml')
         self.order_book_result.set_book(None, language=self.ui.language, theme=self.ui.effective_theme)
+        self.support_chart.set_bars([])
+        self.support_chart.set_zones(None)
+        self.support_chart.message = '选择个股后显示已完成日线及支撑阻力区。'
+        self.ui.set_text(self.detail_data_state, '报价、盘口与日线时间将在个股详情显示。')
         self.ui.set_text(self.plan_result, '选择个股后，可按已确认支撑区计算假设计划。')
         self.alert_result.setStyleSheet('')
         self.ui.set_text(self.alert_result, '提醒仅在 MooPie 开启且 OpenD 可用时检查新报价。')
@@ -763,6 +887,7 @@ class ResearchWindow(QMainWindow):
 
     def start(self, action, reuse=False, refresh=False, update=False, depth=False):
         if self.process is not None: return
+        if hasattr(self, 'depth_timer'): self.depth_timer.stop()
         text = self.symbol.text().strip()
         try:
             code = None if action in ('sync-directory', 'overview', 'radar') else self.symbol_search.query_code()
@@ -1005,9 +1130,14 @@ class ResearchWindow(QMainWindow):
             signal_view += '<p>支撑阻力未能写入 SQLite：' + esc(result['price_signal_storage_error']) + '</p>'
         self.ui.set_text(self.price_signal_result, signal_view, 'setHtml')
         self.order_book_result.set_book(result.get('order_book'), result.get('quote'),
-                                        language=self.ui.language, theme=self.ui.effective_theme)
+                                        language=self.ui.language, theme=self.ui.effective_theme,
+                                        history=result.get('order_book_history', []))
         if action == 'trend':
+            self.show_support_chart(result)
+            self.show_detail_data_status(result)
             self.show_buy_plan_context(result)
+            if result.get('order_book', {}).get('status') == 'ok':
+                self.depth_timer.start()
         heading = f'<h2>{esc(result["symbol"])} · {"卖出 Put" if action == "put" else "走势"}</h2>'
         if action == 'trend':
             content = (''.join('<h2>' + esc(item['symbol']) + '</h2>' + trend_html(item) for item in result['items'])
@@ -1160,8 +1290,11 @@ class ResearchWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.alert_timer.stop()
+        self.depth_timer.stop()
         if self.alert_process:
             self.alert_process.kill(); self.alert_process.waitForFinished(2000)
+        if self.depth_process:
+            self.depth_process.kill(); self.depth_process.waitForFinished(2000)
         self.symbol_search.shutdown()
         self.paper_panel.shutdown()
         if self.process:
