@@ -118,22 +118,8 @@ class OrderBookChart(QScrollArea):
                           f'QProgressBar::chunk{{background:{green};border-radius:5px;}}')
         bar.setAccessibleName('Visible bid value share' if english else '可见买盘金额占比')
         self.body.addWidget(bar)
-        self._label('Calculated from all returned visible levels, not just nearby ranges. Orders may be cancelled; this is not traded money flow.' if english else
-                    '按本次返回的全部可见档位计算，不只看最近区间；挂单可撤销，这不是已成交资金流向。', muted=True)
-
-    def _zone_summary(self, zone, title, reference_name, color, *, english):
-        if zone is None:
-            self._label(title + (' · unavailable' if english else ' · 暂无可见挂单'))
-            return
-        label = self._label(f'{title}  {price_range(zone)}', large=True)
-        label.setStyleSheet(f'color:{color};font-size:18px;font-weight:bold;')
-        distance = (f' · {zone["distance_pct"]:.2f}% from {reference_name}' if english else
-                    f' · 距{reference_name} {zone["distance_pct"]:.2f}%') if zone['distance_pct'] is not None else ''
-        amount = zone.get('notional')
-        amount_note = (f' · estimated limit-order value ≈${amount:,.0f}' if english else
-                       f' · 按挂单价估算约 ${amount:,.0f}') if amount is not None else ''
-        self._label((f'{zone["volume"]:,.0f} visible shares · {zone["levels"]} merged levels' if english else
-                     f'可见 {zone["volume"]:,.0f} 股 · 合并 {zone["levels"]} 档') + amount_note + distance)
+        self._label('Calculated from all returned visible levels, including farther prices. Orders may be cancelled; this is not traded money flow.' if english else
+                    '按本次返回的全部可见档位计算，包含较远价位；挂单可撤销，这不是已成交资金流向。', muted=True)
 
     def _bucket_summary(self, bucket, title, color, *, english):
         if bucket is None:
@@ -264,15 +250,6 @@ class OrderBookChart(QScrollArea):
                      for side in ('bids', 'asks')}
         self._volume_section('Largest ranges by visible shares in returned depth' if english else
                              '已返回档位中挂单股数最多的区间', strongest, english=english, theme=theme)
-        for side, color in (('bids', '#48d67f' if theme == 'dark' else '#167a3e'),
-                            ('asks', '#ff7777' if theme == 'dark' else '#bd3030')):
-            title = ('Nearest visible bid range' if side == 'bids' else 'Nearest visible ask range') if english else (
-                '最近买盘区间' if side == 'bids' else '最近卖盘区间')
-            self._zone_summary(zones[side][0] if zones[side] else None, title,
-                               labels[reference['session']], color, english=english)
-        self._volume_section('Nearby visible shares by merged price range' if english else
-                             '邻近价位合并后的挂单股数',
-                             {side: zones[side][:4] for side in ('bids', 'asks')}, english=english, theme=theme)
         self._label('Bars show shares, not order count or traded value. Dollar figures sum each visible limit price × shares; no execution is implied.' if english else
                     '柱长表示挂单股数，不是订单笔数或成交金额。美元数为各档挂单价 × 股数的合计，仅作名义金额参考。', muted=True)
         collected = book.get('collected_at') or ('Unavailable' if english else '未提供')
@@ -282,8 +259,8 @@ class OrderBookChart(QScrollArea):
                         + str(quote['update_time']), muted=True)
         if price and ((zones['bids'] and zones['bids'][0]['low'] > price) or
                       (zones['asks'] and zones['asks'][0]['high'] < price)):
-            self._label('The selected trade price is outside the nearest book ranges; quote and depth may differ in time or session.' if english else
-                        '所选时段参考价落在最近盘口区间外；报价与盘口可能来自不同时间或时段。', muted=True)
+            self._label('The trade price is outside the visible book prices; quote and depth may differ in time or session.' if english else
+                        '所选时段参考价落在可见盘口价位外；报价与盘口可能来自不同时间或时段。', muted=True)
         if not book.get('bid_server_time') or not book.get('ask_server_time'):
             self._label('Exchange update time unavailable; freshness cannot be verified.' if english else
                         '交易所更新时间未提供，无法核对盘口时效。', muted=True)

@@ -377,7 +377,7 @@ class ResearchUiTests(unittest.TestCase):
         remaining = re.search('[\u4e00-\u9fff]', translated)
         self.assertIsNone(remaining, translated[remaining.start()-80:remaining.start()+80] if remaining else '')
 
-    def test_order_book_chart_highlights_nearest_merged_bid_range(self):
+    def test_order_book_chart_shows_buckets_without_nearest_ranges(self):
         book=dict(status='ok',depth=10,collected_at='2026-10-23T18:00:00+00:00',
                   bid_server_time=None,ask_server_time=None,
                   bids=[dict(price=100.00,volume=50),dict(price=99.98,volume=150),
@@ -388,16 +388,16 @@ class ResearchUiTests(unittest.TestCase):
         chart.set_book(book,dict(last_price=100.10),language='zh',theme='dark')
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
-        self.assertIn('最近买盘区间  $99.96–$100.00',text)
-        self.assertIn('可见 400 股 · 合并 3 档 · 按挂单价估算约 $39,989 · 距常规时段最新成交价 0.10%',text)
-        self.assertIn('最近卖盘区间  $100.12–$100.14',text)
+        self.assertNotIn('最近买盘区间',text)
+        self.assertNotIn('最近卖盘区间',text)
+        self.assertNotIn('邻近价位合并后的挂单股数',text)
         self.assertIn('可见买卖盘金额比例',text)
         self.assertIn('买盘 $79,869',text)
         self.assertIn('卖盘 $40,164',text)
         self.assertIn('并非全市场买卖总量',text)
         self.assertIn('范围内买盘挂单最多的价格桶  -5%–0%',text)
         self.assertIn('自动分桶：参考价上下各 6 桶，每桶 5%',text)
-        self.assertEqual(len(chart.findChildren(QProgressBar)),11)
+        self.assertEqual(len(chart.findChildren(QProgressBar)),7)
         chart.bucket_width.setCurrentIndex(chart.bucket_width.findData(10))
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
@@ -459,7 +459,7 @@ class ResearchUiTests(unittest.TestCase):
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
         self.assertIn('常规时段 last_price $216.00 · 盘后参考价 $216.43',text)
-        self.assertIn('距盘后参考价',text)
+        self.assertIn('$216.15',text)
         self.assertNotIn('距现价',text)
         self.assertIn('交易所更新时间未提供',text)
 
