@@ -70,9 +70,13 @@ class OrderBookChart(QScrollArea):
                 track = '#303542' if theme == 'dark' else '#dce4ed'
                 bar.setStyleSheet(f'QProgressBar{{border:0;border-radius:5px;background:{track};}}'
                                   f'QProgressBar::chunk{{background:{color};border-radius:5px;}}')
-                volume = QLabel(f'{zone["volume"]:,.0f}')
+                amount = zone.get('notional')
+                volume_text = f'{zone["volume"]:,.0f} shares' if english else f'{zone["volume"]:,.0f} 股'
+                if amount is not None:
+                    volume_text += f'\n≈${amount:,.0f}'
+                volume = QLabel(volume_text)
                 volume.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                volume.setMinimumWidth(65)
+                volume.setMinimumWidth(94)
                 line.addWidget(range_label); line.addWidget(bar, 1); line.addWidget(volume)
                 self.body.addLayout(line)
         if not visible: self._label('No visible levels' if english else '暂无可见档位')
@@ -123,18 +127,23 @@ class OrderBookChart(QScrollArea):
                 value = f'{title}  {price_range(nearest)}'
                 label = self._label(value, large=True)
                 label.setStyleSheet(f'color:{color};font-size:18px;font-weight:bold;')
+                amount = nearest.get('notional')
+                amount_note = (f' · estimated limit-order value ≈${amount:,.0f}' if english else
+                               f' · 按挂单价估算约 ${amount:,.0f}') if amount is not None else ''
                 self._label((f'{nearest["volume"]:,.0f} visible shares · {nearest["levels"]} merged levels' if english else
-                             f'可见 {nearest["volume"]:,.0f} 股 · 合并 {nearest["levels"]} 档') + distance)
+                             f'可见 {nearest["volume"]:,.0f} 股 · 合并 {nearest["levels"]} 档') + amount_note + distance)
             else:
                 self._label(title + (' · unavailable' if english else ' · 暂无可见挂单'))
         strongest = {side: sorted(zones[side], key=lambda zone: (-zone['volume'],
                          zone['distance_pct'] if zone['distance_pct'] is not None else 0))[:3]
                      for side in ('bids', 'asks')}
-        self._volume_section('Largest visible ranges in returned depth' if english else
-                             '已返回档位中挂单量最大的区间', strongest, english=english, theme=theme)
-        self._volume_section('Nearby volume by merged price range' if english else
-                             '邻近价位合并后的挂单量',
+        self._volume_section('Largest ranges by visible shares in returned depth' if english else
+                             '已返回档位中挂单股数最多的区间', strongest, english=english, theme=theme)
+        self._volume_section('Nearby visible shares by merged price range' if english else
+                             '邻近价位合并后的挂单股数',
                              {side: zones[side][:4] for side in ('bids', 'asks')}, english=english, theme=theme)
+        self._label('Bars show shares, not order count or traded value. Dollar figures sum each visible limit price × shares; no execution is implied.' if english else
+                    '柱长表示挂单股数，不是订单笔数或成交金额。美元数为各档挂单价 × 股数的合计，仅作名义金额参考。', muted=True)
         collected = book.get('collected_at') or ('Unavailable' if english else '未提供')
         self._label(('Collected (UTC): ' if english else '盘口采集（UTC）：') + collected, muted=True)
         if (quote or {}).get('update_time'):

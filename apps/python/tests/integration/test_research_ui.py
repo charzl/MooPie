@@ -389,7 +389,7 @@ class ResearchUiTests(unittest.TestCase):
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
         self.assertIn('最近买盘区间  $99.96–$100.00',text)
-        self.assertIn('可见 400 股 · 合并 3 档 · 距常规时段最新成交价 0.10%',text)
+        self.assertIn('可见 400 股 · 合并 3 档 · 按挂单价估算约 $39,989 · 距常规时段最新成交价 0.10%',text)
         self.assertIn('最近卖盘区间  $100.12–$100.14',text)
         self.assertIn('并非全市场买卖总量',text)
         self.assertEqual(len(chart.findChildren(QProgressBar)),8)
@@ -407,11 +407,12 @@ class ResearchUiTests(unittest.TestCase):
         chart.set_book(book,dict(last_price=100,update_time='2026-10-26 10:00:00'),language='zh',theme='dark')
         self.app.processEvents()
         text=' '.join(label.text() for label in chart.findChildren(QLabel))
-        self.assertIn('已返回档位中挂单量最大的区间',text)
+        self.assertIn('已返回档位中挂单股数最多的区间',text)
         self.assertIn('$95.00  (5.00%)',text)
         self.assertIn('$105.00  (5.00%)',text)
         self.assertIn('100,000',text)
         self.assertIn('90,000',text)
+        self.assertIn('柱长表示挂单股数，不是订单笔数或成交金额',text)
 
     def test_after_hours_order_book_compares_with_after_price_and_labels_regular_last(self):
         book=dict(status='ok', depth=10, collected_at='2026-10-26T21:45:58+00:00',

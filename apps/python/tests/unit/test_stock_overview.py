@@ -53,6 +53,8 @@ class StockOverviewTests(unittest.TestCase):
         self.assertEqual(len(zones['bids']),1)
         self.assertEqual((zones['bids'][0]['low'],zones['bids'][0]['high']), (99.98,100))
         self.assertEqual(zones['bids'][0]['volume'],240)
+        self.assertAlmostEqual(zones['bids'][0]['notional'],
+                               100*10 + 99.99*200 + 99.98*30)
         self.assertEqual(len(zones['asks']),1)
         self.assertEqual(zones['asks'][0]['volume'],200)
         distant=dict(result,bids=[dict(price=100,volume=10),dict(price=99.99,volume=20),

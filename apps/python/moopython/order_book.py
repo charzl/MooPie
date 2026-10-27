@@ -98,6 +98,7 @@ def visible_price_zones(book, reference_price=None):
             distance = max(low-reference_price, reference_price-high, 0) if reference_price else None
             distance_pct = distance / reference_price * 100 if reference_price else None
             items.append(dict(low=low, high=high, volume=sum(row['volume'] for row in group),
+                              notional=round(sum(row['price'] * row['volume'] for row in group), 2),
                               levels=len(group), distance_pct=distance_pct))
         if reference_price:
             items.sort(key=lambda zone: (zone['distance_pct'],
