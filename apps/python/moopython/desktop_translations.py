@@ -518,6 +518,10 @@ OpenD 连接	OpenD Connection
 支撑阻力	Support & Resistance
 买卖盘变化	Order Book Changes
 买入计划与提醒	Buy Plan & Alerts
+支撑回测	Support Study
+支撑追踪	Support Tracking
+正在计算支撑回测…	Calculating the support study…
+正在重建支撑区事件…	Reconstructing support events…
 已完成日线 · 趋势、支撑压力与价格位置	Completed daily bars · Trend, support, resistance and price position
 默认查看已保存的收盘结果；点击「更新行情」刷新。首次查询新股票会自动抓取。	Show saved closing results by default. Select Update Quotes to refresh. New tickers are fetched on first query.
 正在读取已保存的收盘结果…	Loading saved closing results…

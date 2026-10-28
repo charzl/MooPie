@@ -68,6 +68,8 @@ price_signals: 按股票代码组织的独立价格位置与择时信号
 
 `research_cli radar` 读取相同 Watchlist 报价和 SQLite 已保存价位，返回按关注状态与距支撑区排序的 `rows[]`。每行在首页报价字段外增加 `support_low`、`support_high`、`signal_as_of`、`alert_mode`、`state`、`distance_pct`、`stale_alert`；没有价位或报价时相应字段为 `null`，状态为 `levels_unavailable` 或 `quote_unavailable`。`research_cli alerts` 的记录增加 `confirmation_mode`、`entered_at`、`last_bar_date`；`event` 只在首次进入确认或失效状态时为真。
 
+单股 `trend --depth` 的 `support_study` 与 `price_signals` 平级，含 `status`、`version`、`symbol`、`as_of`、`definition` / `definition_key`、`input_hash`、完整 `input_series`、`continued_from`、`backtest` 和 `lifecycle`。`backtest.samples[]` 保存前一收盘定义的冻结区域、触及日期、参考收盘及5／10／20日 `outcomes[]`；`status=pending` 的观察期收益字段为 `null`。`summaries[]` 分别返回完成／待观察数、上涨／下跌／持平数、涨跌均值和中位数、最大反弹／下跌中位数、最差下跌及跌破次数。`lifecycle.records[]` 含稳定 `zone_id`、冻结上下沿、首个转折确认和首次跟踪日期、`state`、测试／跌破计数、证据及完整 `events[]`；状态包括 `active`、`testing`、`held`、`broken`、`broken_retest`、`resistance`、`reclaimed`、`basis_changed`、`history_gap`。后两种停止延续并保留旧状态历史。成功保存时另有 `support_study_saved_at`，存储失败保留独立错误；当前日线不可用且有历史报告时，`saved_support_study` 明确包装旧 `study` 与 `calculated_at`，不当作当前结果。
+
 桌面「导出结果」会再按动作包装：顶层的 `put` 和 / 或 `trend` 对应上述单股票研究结果。重算桌面 Put 导出时提取 `exported['put']['input_dataset']`；直接保存的研究 CLI Put 结果则提取 `result['input_dataset']`。再把原始 dataset 交给 `analyze` 或研究 CLI `--input`，报告本身不能当作原始数据。
 
 研究 CLI 的已处理运行错误为 `{"error":"..."}`，参数用法错误仍是 argparse stderr；先检查退出码再解析。

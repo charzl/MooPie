@@ -11,7 +11,7 @@
 | `collect SYMBOL...` | `--months 3`、`--enrich INPUT`、`--output PATH`（必需）、`--port`、`--refresh` | 原始 JSON 文件；stdout 是保存摘要 |
 | `analyze INPUT` | `--output PATH`（必需）、`--config PATH`、`--budget USD`、`--top N`、`--rank-by`、`--csv-output PATH`、`--scan-only` | 分析 JSON、可选 CSV；stdout 是摘要 |
 | `mcp` | `--host`、`--port` | stdio 协议，等待宿主输入 |
-| `db` | `status`、`schema`、`watchlist`、`price-signals SYMBOL [--limit N]`、`import-watchlist PATH`、`export-watchlist PATH`、`search QUERY [--limit N]`、`sync-symbols [--port N]`、`retention --days N`、`cleanup --older-than-days N [--dry-run]`、`vacuum` | 状态 / 本地股票候选 / 支撑阻力历史 / 同步 / 清理 JSON；`schema` 输出 SQL；`sync-symbols` 和显式导入验证可连接 OpenD |
+| `db` | `status`、`schema`、`watchlist`、`price-signals SYMBOL [--limit N]`、`support-studies SYMBOL [--limit N]`、`import-watchlist PATH`、`export-watchlist PATH`、`search QUERY [--limit N]`、`sync-symbols [--port N]`、`retention --days N`、`cleanup --older-than-days N [--dry-run]`、`vacuum` | 状态 / 本地股票候选 / 支撑阻力历史与回测追踪 / 同步 / 清理 JSON；`schema` 输出 SQL；`sync-symbols` 和显式导入验证可连接 OpenD |
 | `watchlist [LIST.json]` | `--check-only`、`--action both\|put\|trend`、`--top 5\|10\|20`、`--rank-by`、`--config`、`--refresh`、`--port`、`--output` | 默认读 SQLite；可选 JSON 临时输入；全名单预检查及逐股研究 JSON |
 | `desktop` | `--classic`（可选旧面板） | 桌面窗口；需安装 desktop extra |
 | `paper` | `strategies`、`list`、`create`、`backtest`、`update ID`、`report ID`、`watch ID` | 本地股票模拟实验与JSON报告；详见[模拟盘](../guides/paper-trading.md) |
@@ -33,6 +33,8 @@
 `sync-directory [--port N] [--output PATH]` 是桌面用的目录更新子进程入口，与 `./moomoo db sync-symbols` 共用实现；日志走 stderr，成功 JSON 包含 `action=directory_sync`、导入数量、目录总数、别名数、更新时间及不支持格式的 `skipped[]`。Put / trend / add 的位置参数仍是明确代码；名称解析先调用本地 `db search` 或在桌面候选中选择。
 
 根目录启动器没有 `research` 或 `trend` 子命令。使用项目解释器：
+
+单股 `trend SYMBOL --depth` 的 `support_study` 包含支撑触及后5／10／20日表现、未完成观察期和冻结支撑生命周期；与当前价位复用相同已验证日线，保存在 `support_studies`。用 `./moomoo db support-studies SYMBOL --limit 5` 可离线读取完整输入和事件历史。定义见[趋势分析](../guides/trend-analysis.md#6-支撑回测与冻结区间追踪)。
 
 `collect`、`watchlist` 和研究 CLI 支持 `--update` 增量补抓，与强制 `--refresh` 互斥；盘中报价缓存有效期用 `--max-age-seconds` 设置，默认60，范围1–3600。普通无标志查询行为不变；`--input` 不与 update / refresh 同用。研究报告保留每股 Top 20 后归并全局 Top N，完整原始输入仍可离线重选。
 

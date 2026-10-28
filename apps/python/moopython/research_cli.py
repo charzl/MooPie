@@ -111,27 +111,49 @@ def main(argv=None):
                 from .price_signals import price_position, unavailable
                 from .timeframe_levels import timeframe_levels
                 from .price_signal_store import PriceSignalStore
+                from .support_study import support_study, unavailable as unavailable_study
+                from .support_study_store import SupportStudyStore
                 from .market_collection import us_symbols
                 code = us_symbols([args.symbol])[0]
                 try:
                     with market_data_connection(port=args.port, update=True,
                                                 max_age_seconds=args.max_age_seconds) as service:
-                        quote = next(row for row in service.snapshots([code])['rows'] if row['code'] == code)
-                        result['quote'] = quote
+                        quote = None
+                        try:
+                            quote = next(row for row in service.snapshots([code])['rows'] if row['code'] == code)
+                            result['quote'] = quote
+                        except Exception as error:
+                            result['quote_error'] = str(error)
                         if result.get('trend', {}).get('status') == 'ok':
                             daily = service.daily_bars([code])
                             series = next(row for row in daily['daily_series'] if row['symbol'] == code)
-                            signal = price_position(series, result['trend'], reference=dict(
-                                price=quote['last_price'], time=quote.get('update_time'), basis='underlying_snapshot'))
+                            reference = (dict(price=quote['last_price'], time=quote.get('update_time'),
+                                              basis='underlying_snapshot') if quote else None)
+                            signal = price_position(series, result['trend'], reference=reference)
                             if signal['status'] == 'ok':
                                 signal['multi_timeframe'] = timeframe_levels(
                                     series, signal, daily.get('decision_cutoff') or daily.get('fetched_at'))
                                 result['chart_bars'] = series['bars']
                             result['price_signals'] = {code: signal}
+                            try:
+                                saved_study = SupportStudyStore().evaluate(series, result['trend'])
+                                result['support_study'] = saved_study['study']
+                                result['support_study_saved_at'] = saved_study['calculated_at']
+                            except (OSError, RuntimeError, ValueError, KeyError) as error:
+                                result['support_study'] = support_study(series, result['trend'])
+                                result['support_study_storage_error'] = str(error)
                 except Exception as error:
-                    result['quote_error'] = str(error)
+                    result['detail_error'] = str(error)
+                    result['support_study'] = unavailable_study(code, error)
                     if result.get('trend', {}).get('status') != 'ok':
                         result['price_signals'] = {code: unavailable(code, result['trend'].get('error', str(error)))}
+                if result.get('support_study', {}).get('status') != 'ok':
+                    result.setdefault('support_study', unavailable_study(code, result.get('trend', {}).get('error', '已验证日线不可用')))
+                    try:
+                        previous_study = SupportStudyStore().latest(code)
+                        if previous_study: result['saved_support_study'] = previous_study
+                    except (OSError, RuntimeError, ValueError, KeyError) as error:
+                        result['support_study_storage_error'] = str(error)
                 result['order_book'] = read_order_book(args.symbol, args.port)
                 from .order_book_history import OrderBookHistory
                 try:

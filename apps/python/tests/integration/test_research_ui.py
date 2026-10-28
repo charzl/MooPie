@@ -378,7 +378,18 @@ class ResearchUiTests(unittest.TestCase):
         self.assertIn('周线', self.window.timeframe_summary.text())
         self.assertEqual(PriceSignalStore().latest('US.TEST')['signal'], signal)
         self.assertIn('已保存到 SQLite', self.window.price_signal_result.toPlainText())
+        from moopython.support_study_store import SupportStudyStore
+        study = self.window.results['trend']['support_study']
+        self.assertEqual(study['status'], 'ok')
+        self.assertEqual(SupportStudyStore().latest('US.TEST')['study'], study)
+        self.assertIn('触及后表现回测', self.window.support_backtest_result.toPlainText())
+        self.assertIn('生命周期', self.window.support_lifecycle_result.toPlainText())
         self.window.change_language('en')
+        self.assertIn('Support Touch Study', self.window.support_backtest_result.toPlainText())
+        self.assertIsNone(re.search('[\u4e00-\u9fff]', self.window.support_backtest_result.toPlainText()))
+        self.window.show_support_study(dict(support_study=dict(status='unavailable', reason='missing'),
+                                            saved_support_study=dict(study=study, calculated_at='2026-10-27T20:00:00+00:00')))
+        self.assertIn('Saved historical result', self.window.support_backtest_result.toPlainText())
         self.assertFalse(re.search('[\u4e00-\u9fff]', self.window.timeframe_summary.text()))
         translated = self.window.price_signal_result.toPlainText()
         remaining = re.search('[\u4e00-\u9fff]', translated)
@@ -438,9 +449,9 @@ class ResearchUiTests(unittest.TestCase):
         self.window.tabs.setCurrentIndex(2)
         self.window.show()
         self.app.processEvents()
-        self.assertEqual([self.window.depth_tabs.tabText(i) for i in range(4)],
-                         ['支撑阻力', '买卖盘变化', '走势分析', '买入计划与提醒'])
-        for index in range(4):
+        self.assertEqual([self.window.depth_tabs.tabText(i) for i in range(6)],
+                         ['支撑阻力', '买卖盘变化', '走势分析', '买入计划与提醒', '支撑回测', '支撑追踪'])
+        for index in range(6):
             self.window.depth_tabs.setCurrentIndex(index)
             self.app.processEvents()
             self.assertGreater(self.window.depth_tabs.currentWidget().height(), 350)

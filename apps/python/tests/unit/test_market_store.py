@@ -167,7 +167,7 @@ class StoreTests(unittest.TestCase):
                 ('US.TEST', 90, 94, '2026-10-23', 'inside', '2026-10-26 09:31:00', 93, NULL, '2026-10-26T17:00:00+00:00')""")
             db.commit()
         with self.store.connect() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 9)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 10)
             self.assertEqual(db.execute('SELECT symbol FROM watchlist').fetchone()[0], 'US.TEST')
             self.assertEqual(db.execute('SELECT status, confirmation_mode, entered_at FROM buy_alerts').fetchone(),
                              ('inside', 'quote', ''))

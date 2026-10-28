@@ -27,6 +27,7 @@ flowchart TD
 | 查询时段与缓存策略 | [market_repository.py](../../apps/python/moopython/market_repository.py)、[market_sessions.py](../../apps/python/moopython/market_sessions.py) | 延迟连接 OpenD，盘后优先查匹配缓存、缺失自动抓取，保留原始时间 |
 | 持久化快照与清理 | [market_store.py](../../apps/python/moopython/market_store.py)、[database](../../apps/python/moopython/database)、[database_cli.py](../../apps/python/moopython/database_cli.py) | 独立版本化 SQL 迁移、压缩、校验和、保留期与清理；不写规则 |
 | 历史支撑阻力 | [price_signal_store.py](../../apps/python/moopython/price_signal_store.py)、[006_price_signals.sql](../../apps/python/moopython/database/migrations/006_price_signals.sql) | 保存个股有效价位、报价时间、算法版本与转折依据；支持按股票查询历史 |
+| 支撑回测与生命周期 | [support_study.py](../../apps/python/moopython/support_study.py)、[support_study_store.py](../../apps/python/moopython/support_study_store.py)、[support_study_view.py](../../apps/python/moopython/support_study_view.py) | 历史前缀定义支撑、互不重叠的触及样本、未完成观察期保持 pending；冻结区域按新增日线推进，SQLite 保留原始输入和完整事件 |
 | 多股票快照复用 | [market_payloads.py](../../apps/python/moopython/market_payloads.py) | 批次投影为单股，组合时保留各自采集来源；不计算指标 |
 | 股票名称目录与候选 | [security_directory.py](../../apps/python/moopython/security_directory.py)、[symbol_search.py](../../apps/python/moopython/symbol_search.py) | 同一 SQLite 的证券 / 别名表；本地前缀与通配符匹配，用户选定代码后才研究，显式同步目录 |
 | 合约查询窗口与限流 | [options.py](../../apps/python/moopython/options.py) | 复用 `OptionChainService` |

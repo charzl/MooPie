@@ -18,6 +18,9 @@ with tempfile.TemporaryDirectory(prefix='moomoo wheel ') as directory:
 from moopython.research import load_rules
 from moopython.price_signals import price_position
 from moopython.price_signal_view import signals_html
+from moopython.support_study import support_study
+from moopython.support_study_store import SupportStudyStore
+from moopython.support_study_view import backtest_html
 from moopython.market_repository import market_data_connection
 from moopython.saved_research import analysis_revision, completed_session
 from moopython.position_efficiency import put_efficiency
@@ -41,6 +44,9 @@ r = load_rules()
 signal = price_position(None, dict(symbol='US.TEST', status='invalid_data', error='no history'))
 assert signal['status'] == 'unavailable' and signal['ranking_effect'] == 'none'
 assert 'US.TEST' in signals_html({'US.TEST': signal})
+assert support_study(None, dict(symbol='US.TEST', status='unavailable'))['status'] == 'unavailable'
+assert 'Support Touch Study' in backtest_html(None, 'en')
+assert SupportStudyStore(SnapshotStore('support-wheel-check.sqlite3')).history('US.TEST') == []
 assert (DATABASE_ROOT/'schema.sql').read_text(encoding='utf-8') == schema_sql()
 assert Path(r.__file__).name == '_bundled_put_rules.py'
 assert len(engine_hash()) == 64 and len(STRATEGIES) == 6

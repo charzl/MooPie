@@ -30,6 +30,7 @@ from .order_book_chart import OrderBookChart
 from .chart import CandleChart
 from .market import Candle
 from .data_status import detail_data_status
+from .support_study_view import backtest_html, lifecycle_html, zone_context_html
 from .desktop_preferences import DesktopPreferences
 from .paper_ui import PaperPanel
 from .desktop_widgets import SelectBox
@@ -74,6 +75,7 @@ class ResearchWindow(QMainWindow):
         self.ui = DesktopPreferences(self.settings, self)
         self.process = None
         self.results = {}
+        self.evidence_result = None
         self.put_dataset = None
         self.watchlist_quotes = {}
         self.watchlist = WatchlistStore()
@@ -278,10 +280,13 @@ class ResearchWindow(QMainWindow):
         card.addLayout(list_footer)
         self.put_result = QTextBrowser(); self.trend_result = QTextBrowser()
         self.price_signal_result = QTextBrowser()
+        self.support_backtest_result = QTextBrowser()
+        self.support_lifecycle_result = QTextBrowser()
         self.order_book_result = OrderBookChart()
         self.support_chart = CandleChart()
         self.support_chart.message = '选择个股后显示已完成日线及支撑阻力区。'
-        for panel in (self.put_result, self.trend_result, self.price_signal_result):
+        for panel in (self.put_result, self.trend_result, self.price_signal_result,
+                      self.support_backtest_result, self.support_lifecycle_result):
             panel.setOpenExternalLinks(False)
         self.tabs.addTab(self.ranking_card, '推荐与候选')
         self.tabs.addTab(self.put_result, '合约详情 / 筛选依据')
@@ -354,6 +359,8 @@ class ResearchWindow(QMainWindow):
         plan_layout.addWidget(self.alert_result)
         plan_layout.addStretch()
         self.depth_tabs.addTab(plan_page, '买入计划与提醒')
+        self.depth_tabs.addTab(self.support_backtest_result, '支撑回测')
+        self.depth_tabs.addTab(self.support_lifecycle_result, '支撑追踪')
         technical_layout.addWidget(self.depth_tabs,1)
         self.tabs.addTab(technical_page, '技术面依据')
         self.paper_panel = PaperPanel(self)
@@ -450,6 +457,9 @@ class ResearchWindow(QMainWindow):
                                             language=value, theme=self.ui.effective_theme,
                                             history=self.order_book_result.history)
         if self.results.get('trend'): self.show_detail_data_status(self.results['trend'])
+        if self.evidence_result:
+            self.show_price_signals(self.evidence_result)
+            self.show_support_study(self.evidence_result)
 
     def change_theme(self, value):
         self.ui.set_theme(value)
@@ -755,6 +765,38 @@ class ResearchWindow(QMainWindow):
             self.support_chart.message = ('已验证日线不足，暂不能绘制支撑阻力图。' if self.ui.language == 'zh' else
                                           'Validated daily bars unavailable; support chart cannot be shown.')
 
+    def show_support_study(self, result=None):
+        result = result or {}
+        study = result.get('support_study')
+        note = ''
+        english = self.ui.language == 'en'
+        if (not study or study.get('status') != 'ok') and result.get('saved_support_study'):
+            saved = result['saved_support_study']
+            note = ('<p><b>Saved historical result; the current query is unavailable. Saved at ' if english else
+                    '<p><b>当前查询不可用；以下为已保存的历史结果。保存于 ')+esc(saved['calculated_at'])+' UTC。</b></p>'
+            study = saved['study']
+        if result.get('support_study_storage_error'):
+            note += ('<p>SQLite storage error: ' if english else '<p>SQLite 保存错误：')+esc(result['support_study_storage_error'])+'</p>'
+        if result.get('support_study_saved_at'):
+            note += ('<p>Saved in SQLite at ' if english else '<p>已保存到 SQLite · ')+esc(result['support_study_saved_at'])+' UTC</p>'
+        self.ui.set_text(self.support_backtest_result, note+backtest_html(study, self.ui.language), 'setHtml')
+        self.ui.set_text(self.support_lifecycle_result, note+lifecycle_html(study, self.ui.language), 'setHtml')
+
+    def show_price_signals(self, result):
+        signals = dict(result.get('price_signals', {}))
+        signal_view = zone_context_html(result.get('support_study'), signals.get(result.get('symbol')),
+                                        self.ui.language)+signals_html(signals)
+        if result.get('price_signal_saved_at'):
+            signal_view += '<p>支撑阻力已保存到 SQLite · 计算时间 ' + esc(result['price_signal_saved_at']) + '（UTC）</p>'
+        if result.get('saved_price_signal'):
+            saved = result['saved_price_signal']
+            signal_view += ('<hr><h3>上次保存的历史价位</h3><p>当前分析不可用；以下结果按当时的参考价与日线计算，可能已经过时。保存时间 '
+                            + esc(saved['calculated_at']) + '（UTC）</p>'
+                            + signals_html({saved['signal']['symbol']: saved['signal']}))
+        if result.get('price_signal_storage_error'):
+            signal_view += '<p>支撑阻力未能写入 SQLite：' + esc(result['price_signal_storage_error']) + '</p>'
+        self.ui.set_text(self.price_signal_result, signal_view, 'setHtml')
+
     def open_overview_row(self, row, _column):
         item = self.overview_table.item(row, 0)
         if item: self.open_stock(item.data(Qt.ItemDataRole.UserRole))
@@ -858,6 +900,8 @@ class ResearchWindow(QMainWindow):
     def reset_panels(self):
         if hasattr(self, 'depth_timer'): self.depth_timer.stop()
         self.results.clear()
+        self.evidence_result = None
+        self.show_support_study()
         self.put_dataset = None
         self.ui.set_text(self.scope_heading,'分析 · '+(self.symbol.text().strip().upper() or 'Watchlist'))
         self.ui.set_text(self.price_signal_result, signals_html({}), 'setHtml')
@@ -916,6 +960,12 @@ class ResearchWindow(QMainWindow):
             self.clear_candidates('正在用已有数据重新过滤和排序…' if reuse else '正在读取已保存的收盘结果…' if not(refresh or update) else '正在按交易时段读取行情并筛选合约…')
         if action in ('put','trend'): self.tabs.setCurrentIndex(0 if action == 'put' else 2)
         if action in ('put', 'trend'): self.ui.set_text(self.price_signal_result, '正在分析价格信号…', 'setPlainText')
+        if action in ('put', 'trend'):
+            self.evidence_result = None
+            self.show_support_study()
+        if action == 'trend':
+            self.ui.set_text(self.support_backtest_result, '正在计算支撑回测…', 'setPlainText')
+            self.ui.set_text(self.support_lifecycle_result, '正在重建支撑区事件…', 'setPlainText')
         self.export_button.setEnabled(bool(self.results))
         if action in ('put','trend'): self.ui.set_text(self.panel(action), f'<h2>{esc(code or "Watchlist")}</h2><p>正在抓取和分析…</p>', 'setHtml')
         if action == 'overview': self.ui.set_text(self.overview_note, '正在读取 Watchlist 的价格和基本信息…', 'setText')
@@ -989,6 +1039,7 @@ class ResearchWindow(QMainWindow):
             if self.action == 'overview': self.ui.set_text(self.overview_note, '本次价格更新已取消。', 'setText')
             if self.action == 'radar': self.ui.set_text(self.radar_note, '本次雷达更新已取消。', 'setText')
             self.ui.set_text(self.price_signal_result, '本次分析已取消，未生成价格信号。', 'setPlainText')
+            self.show_support_study(dict(support_study=dict(status='unavailable', reason='本次分析已取消')))
             if self.action in ('put','trend'):
                 self.ui.set_text(self.panel(self.action), '本次分析已取消。可以重新输入股票并开始查询。', 'setPlainText')
             self.ui.set_text(self.status, '已取消；没有生成本次分析结果。', 'setText')
@@ -1034,6 +1085,7 @@ class ResearchWindow(QMainWindow):
             self.ui.set_text(self.status, '买点雷达未完成；请检查 OpenD 和行情权限。', 'setText')
             return
         self.ui.set_text(self.price_signal_result, '本次查询未完成，未生成价格信号。', 'setPlainText')
+        self.show_support_study(dict(support_study=dict(status='unavailable', reason=message)))
         if self.action == 'put':
             self.clear_candidates('查询失败：' + message)
             self.ui.set_text(self.data_state, '本次查询失败', 'setText')
@@ -1120,21 +1172,12 @@ class ResearchWindow(QMainWindow):
         if action == 'radar':
             self.display_radar(result)
             return
-        signals = dict(result.get('price_signals', {}))
+        self.evidence_result = result
         self.update_watchlist_label()
         self.ui.set_text(self.scope_heading,'分析 · '+result['symbol'].removeprefix('US.'))
         self.results[action] = result
-        signal_view = signals_html(signals)
-        if result.get('price_signal_saved_at'):
-            signal_view += '<p>支撑阻力已保存到 SQLite · 计算时间 ' + esc(result['price_signal_saved_at']) + '（UTC）</p>'
-        if result.get('saved_price_signal'):
-            saved = result['saved_price_signal']
-            signal_view += ('<hr><h3>上次保存的历史价位</h3><p>当前分析不可用；以下结果按当时的参考价与日线计算，可能已经过时。保存时间 '
-                            + esc(saved['calculated_at']) + '（UTC）</p>'
-                            + signals_html({saved['signal']['symbol']: saved['signal']}))
-        if result.get('price_signal_storage_error'):
-            signal_view += '<p>支撑阻力未能写入 SQLite：' + esc(result['price_signal_storage_error']) + '</p>'
-        self.ui.set_text(self.price_signal_result, signal_view, 'setHtml')
+        self.show_price_signals(result)
+        self.show_support_study(result)
         self.order_book_result.set_book(result.get('order_book'), result.get('quote'),
                                         language=self.ui.language, theme=self.ui.effective_theme,
                                         history=result.get('order_book_history', []))
@@ -1155,6 +1198,8 @@ class ResearchWindow(QMainWindow):
                            + content)
             if result.get('quote_error'):
                 content += '<p>最新报价未取得：' + esc(result['quote_error']) + '</p>'
+            if result.get('detail_error'):
+                content += '<p>个股日线详情未完成：' + esc(result['detail_error']) + '</p>'
             content += ''.join('<p>查询失败：' + esc(item['symbol']) + ' · ' + esc(item['error']) + '</p>' for item in result.get('collection_errors', []))
         else:
             report = result['report']; ranked = report['ranked']

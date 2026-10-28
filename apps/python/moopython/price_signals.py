@@ -57,6 +57,22 @@ def _zones(bars, side, tolerance):
     return zones
 
 
+def confirmed_zones(bars, price, atr):
+    """Shared zone selection for today's view and historical prefix replay."""
+    bars = bars[-PARAMETERS['lookback']:]
+    tolerance = max(atr*PARAMETERS['zone_atr_fraction'], price*PARAMETERS['zone_price_fraction'])
+    result = dict(zone_tolerance=tolerance)
+    for side, field in (('support', 'support_zones'), ('resistance', 'resistance_zones')):
+        zones = [zone for zone in _zones(bars, side, tolerance)
+                 if (zone['center'] < price if side == 'support' else zone['center'] > price)]
+        for zone in zones:
+            distance = max(0, price-zone['high']) if side == 'support' else max(0, zone['low']-price)
+            zone.update(distance_pct=distance/price*100, distance_atr=distance/atr)
+        zones.sort(key=lambda zone: (zone['distance_pct'], -zone['independent_touches']))
+        result[field] = zones[:PARAMETERS['maximum_zones']]
+    return result
+
+
 def price_position(series, trend, *, reference=None):
     """Describe zones, using only bars already accepted by the trend validator."""
     symbol = trend.get('symbol')
@@ -74,15 +90,9 @@ def price_position(series, trend, *, reference=None):
         if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not isfinite(v) or v<=0 for v in (price, atr)):
             raise ValueError('参考价格或 ATR 无效')
         bars = bars[-PARAMETERS['lookback']:]
-        tolerance = max(atr*PARAMETERS['zone_atr_fraction'], price*PARAMETERS['zone_price_fraction'])
-        supports = [z for z in _zones(bars, 'support', tolerance) if z['center'] < price]
-        resistances = [z for z in _zones(bars, 'resistance', tolerance) if z['center'] > price]
-        for side, zones in [('support', supports), ('resistance', resistances)]:
-            for zone in zones:
-                distance = max(0, price-zone['high']) if side=='support' else max(0, zone['low']-price)
-                zone.update(distance_pct=distance/price*100, distance_atr=distance/atr)
-            zones.sort(key=lambda z:(z['distance_pct'], -z['independent_touches']))
-            del zones[PARAMETERS['maximum_zones']:]
+        regions = confirmed_zones(bars, price, atr)
+        tolerance = regions['zone_tolerance']
+        supports, resistances = regions['support_zones'], regions['resistance_zones']
         support = supports[0] if supports else None
         resistance = resistances[0] if resistances else None
         nearby = PARAMETERS['nearby_atr']
